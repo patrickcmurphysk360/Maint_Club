@@ -131,5 +131,10 @@ export const getServiceDisplayName = (
 ): string => {
   const service = findServiceByKey(serviceKey);
   const genericName = service?.label || serviceKey;
-  return serviceMappings[serviceKey] || genericName;
+  const mappedName = serviceMappings[serviceKey];
+  
+  // TODO: Remove debug logging once service mapping is verified working
+  console.log(`Service display name - Key: ${serviceKey}, Generic: ${genericName}, Mapped: ${mappedName}, Available mappings:`, Object.keys(serviceMappings));
+  
+  return mappedName || genericName;
 };

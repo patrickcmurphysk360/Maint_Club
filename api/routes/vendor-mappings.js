@@ -5,67 +5,43 @@ const pool = require('../db');
 // Get service mappings for a vendor (new simplified endpoint)
 router.get('/', async (req, res) => {
     try {
-        const { vendor_id } = req.query;
+        const { vendor_id, market_id } = req.query;
         
-        if (vendor_id) {
-            // New simplified query for individual service mappings
-            const result = await pool.query(`
-                SELECT 
-                    vpm.id,
-                    vpm.vendor_id,
-                    vpm.service_field,
-                    vpm.product_name,
-                    vpm.vendor_product_id,
-                    vpm.market_id,
-                    vpm.description,
-                    vpm.created_at,
-                    vpm.updated_at
-                FROM vendor_product_mappings vpm
-                WHERE vpm.vendor_id = $1
-                ORDER BY vpm.service_field
-            `, [vendor_id]);
-            
-            return res.json({ mappings: result.rows });
-        }
-        
-        // Original query for backward compatibility
-        const { market_id, vendor } = req.query;
-        
+        // Always return vendor_product_mappings for scorecard compatibility
         let query = `
             SELECT 
-                vm.*,
-                COALESCE(
-                    json_agg(
-                        json_build_object(
-                            'id', vmd.id,
-                            'generic_service', vmd.generic_service,
-                            'branded_service', vmd.branded_service
-                        ) 
-                        ORDER BY vmd.generic_service
-                    ) FILTER (WHERE vmd.id IS NOT NULL), 
-                    '[]'
-                ) as mappings
-            FROM vendor_mappings vm
-            LEFT JOIN vendor_mapping_details vmd ON vm.id = vmd.mapping_id
+                vpm.id,
+                vpm.vendor_id,
+                vpm.service_field,
+                vpm.product_name,
+                vpm.vendor_product_id,
+                vpm.market_id,
+                vpm.description,
+                vpm.created_at,
+                vpm.updated_at
+            FROM vendor_product_mappings vpm
             WHERE 1=1
         `;
         
         const params = [];
+        let paramCount = 0;
+        
+        if (vendor_id) {
+            paramCount++;
+            query += ` AND vpm.vendor_id = $${paramCount}`;
+            params.push(vendor_id);
+        }
         
         if (market_id) {
+            paramCount++;
+            query += ` AND (vpm.market_id = $${paramCount} OR vpm.market_id IS NULL)`;
             params.push(market_id);
-            query += ` AND vm.market_id = $${params.length}`;
         }
         
-        if (vendor) {
-            params.push(vendor);
-            query += ` AND vm.vendor = $${params.length}`;
-        }
-        
-        query += ' GROUP BY vm.id ORDER BY vm.market_id, vm.vendor';
+        query += ` ORDER BY vpm.service_field`;
         
         const result = await pool.query(query, params);
-        res.json(result.rows);
+        return res.json({ mappings: result.rows });
     } catch (error) {
         console.error('Error fetching vendor mappings:', error);
         res.status(500).json({ error: 'Failed to fetch vendor mappings' });

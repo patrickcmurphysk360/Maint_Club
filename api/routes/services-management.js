@@ -5,6 +5,7 @@ const pool = require('../db');
 // GET all services with optional filters
 router.get('/', async (req, res) => {
   try {
+    console.log('Services-management GET /', req.query);
     const { category, is_calculated, active } = req.query;
     
     let query = `
@@ -71,6 +72,24 @@ router.get('/categories', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching categories:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET available services for calculations (non-calculated services only)
+router.get('/available-for-calculation', async (req, res) => {
+  try {
+    console.log('Services-management GET /available-for-calculation');
+    const result = await pool.query(`
+      SELECT id, service_name, service_category, unit_type
+      FROM service_catalog
+      WHERE active = true AND is_calculated = false
+      ORDER BY service_category, display_order, service_name
+    `);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching available services:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -365,23 +384,6 @@ router.delete('/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('Error deleting service:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// GET available services for calculations (non-calculated services only)
-router.get('/available-for-calculation', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT id, service_name, service_category, unit_type
-      FROM service_catalog
-      WHERE active = true AND is_calculated = false
-      ORDER BY service_category, display_order, service_name
-    `);
-    
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching available services:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

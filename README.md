@@ -70,6 +70,7 @@ maint_club/
 - **Product Mapping:** Map service fields to vendor-branded products
 - **Vendor Tags:** Associate markets with vendor partnerships
 - **Branded Scorecards:** Display vendor product names in advisor performance
+- **Service Mapping API:** Dynamic mapping system for generic → branded service names
 
 #### 📈 **Performance Management**
 - **Advisor Scorecards:** Individual performance metrics with vendor branding
@@ -121,9 +122,12 @@ maint_club/
 - `GET /api/scorecard/comparison` - Compare advisor performance
 
 ### Vendor Management
-- `GET /api/vendor/product-mappings` - Get all mappings
-- `POST /api/vendor/product-mappings` - Create mapping
-- `GET /api/vendor/service-fields` - Available service fields
+- `GET /api/vendor-mappings` - Get service mappings (supports vendor_id, market_id filters)
+- `POST /api/vendor-mappings` - Create individual service mapping
+- `PUT /api/vendor-mappings/:id` - Update service mapping
+- `DELETE /api/vendor-mappings/:id` - Delete service mapping
+- `GET /api/vendor-mappings/vendor-products/:vendorId` - Get vendor products
+- `GET /api/vendor-mappings/services/generic` - Available generic services
 
 ### Goals & Coaching
 - `GET /api/goals/:type/:entityId` - Get goals

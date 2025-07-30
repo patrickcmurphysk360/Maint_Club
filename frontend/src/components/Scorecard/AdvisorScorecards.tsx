@@ -74,10 +74,14 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
       
       // Create a mapping object: service_field -> branded_name
       const mappings: Record<string, string> = {};
+      // TODO: Remove debug logging once service mapping is verified working
+      console.log('Raw vendor mappings data:', data);
       (data.mappings || []).forEach((mapping: any) => {
+        console.log('Processing mapping:', mapping);
         mappings[mapping.service_field] = mapping.product_name;
       });
       
+      console.log('Final service mappings:', mappings);
       return mappings;
     } catch (err) {
       console.error('Error fetching service mappings:', err);
