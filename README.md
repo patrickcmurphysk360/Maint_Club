@@ -2,6 +2,8 @@
 
 A performance management portal for automotive service shops with role-based access, vendor integration, and coaching features.
 
+**Last Updated:** January 30, 2025 | **Version:** 2.0.0 | **Status:** Phase 2 - Enhanced Features
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -74,8 +76,9 @@ maint_club/
 
 #### 📈 **Performance Management**
 - **Advisor Scorecards:** Individual performance metrics with vendor branding
-- **Goals System:** Set and track targets at Market/Store/Advisor levels
-- **Achievement Tracking:** Compare actual vs. target performance
+- **Enhanced Goals System:** Set targets for 40+ services across 6 categories
+- **Visual Goal Tracking:** Color-coded indicators and variance calculations
+- **Achievement Tracking:** Compare actual vs. target performance with percentages
 
 #### 💬 **In-App Coaching**
 - **Message Threads:** Manager-to-Advisor communication
@@ -91,14 +94,18 @@ maint_club/
 
 | Role | Features |
 |------|----------|
-| **Admin** | • File uploads<br>• Vendor mapping management<br>• Full system access |
-| **Market Manager** | • Market-level reporting<br>• Goal setting<br>• Advisor coaching |
-| **Store Manager** | • Store-level performance<br>• Advisor goal setting<br>• Team coaching |
-| **Advisor** | • Personal scorecard<br>• Goal tracking<br>• Coaching messages |
+| **Admin** | • File uploads<br>• Vendor mapping management<br>• User profile editing<br>• Advisor-to-user mapping<br>• Services Management with category editing<br>• Scorecard template editor<br>• Full system access |
+| **Market Manager** | • Market-level reporting<br>• Goal setting for all services<br>• Advisor coaching<br>• Visual performance tracking<br>• Scorecard template viewing |
+| **Store Manager** | • Store-level performance<br>• Advisor goal setting<br>• Team coaching<br>• Goal variance monitoring |
+| **Advisor** | • Personal scorecard with goal indicators<br>• Goal tracking with visual feedback<br>• Coaching messages<br>• Branded service display |
 
 ## 🗄️ Database Schema
 
 ### Key Tables
+- **`service_catalog`** - Master list of all services/KPIs with categories
+- **`scorecard_templates`** - Market-specific scorecard configurations
+- **`scorecard_template_categories`** - Template category definitions
+- **`scorecard_template_fields`** - Fields assigned to each category
 - **`vendor_product_mappings`** - Service → Vendor product mapping
 - **`advisor_mappings`** - Spreadsheet names → System users
 - **`performance_data`** - Parsed Excel data storage (JSONB)
@@ -120,6 +127,28 @@ maint_club/
 ### Scorecards
 - `GET /api/scorecard/advisor/:userId` - Get advisor scorecard
 - `GET /api/scorecard/comparison` - Compare advisor performance
+
+### User Management
+- `GET /api/users` - Get all users (with role/status filters)
+- `GET /api/users/:id` - Get single user by ID
+- `POST /api/users` - Create new user
+- `PUT /api/users/:id` - Update user profile and assignments
+
+### Advisor Management
+- `GET /api/advisor-mappings` - Get all advisor mappings
+- `POST /api/advisor-mappings` - Create/update advisor mapping
+- `DELETE /api/advisor-mappings/:id` - Delete advisor mapping
+- `GET /api/advisor-mappings/by-name/:name` - Get mapping by advisor name
+
+### Services Management
+- `GET /api/services-management` - Get all services with filters (category, is_calculated, active)
+- `GET /api/services-management/categories` - Get service categories with counts
+- `GET /api/services-management/available-for-calculation` - Get non-calculated services
+- `POST /api/services-management` - Create new service
+- `PUT /api/services-management/:id` - Update service
+- `DELETE /api/services-management/:id` - Delete service
+- `PUT /api/services-management/categories/rename` - Rename category across all services
+- `PUT /api/services-management/categories/merge` - Merge categories
 
 ### Vendor Management
 - `GET /api/vendor-mappings` - Get service mappings (supports vendor_id, market_id filters)
@@ -268,14 +297,37 @@ The MVP includes demo data:
 - **Vendor Mappings:** BG Products, NAPA, Valvoline
 - **Goals & Coaching:** Sample targets and messages
 
+## 🎯 Recent Updates (January 30, 2025)
+
+### ✅ New Features Added
+- **Enhanced Advisor Management:** Edit profiles and map advisors to users directly from scorecards
+- **Comprehensive Goal System:** Set goals for 40+ services across 6 categories with visual tracking
+- **Advanced Permission System:** Role-based goal setting with detailed error handling
+- **Visual Performance Indicators:** Color-coded goal achievement status with variance percentages
+- **Services Management Integration:** Dynamic service catalog serves as single source of truth
+- **Scorecard Template System:** Market-specific templates with categories from Services Management
+- **Calculated Services Support:** Templates support calculated KPIs with formulas and dependencies
+- **Service Category Management:** Rename and merge service categories with automatic template updates
+
+### 🔧 Current Status
+- **95% Complete** - Production-ready MVP
+- Service categories now fully editable and manageable
+- Debugging goals API permission issue
+- All major features implemented and integrated
+
 ## 🎉 What's Next?
 
-This MVP provides the foundation for:
-- Advanced reporting dashboards
-- Real-time performance monitoring
-- Mobile app integration
-- Advanced vendor partnerships
-- AI-powered coaching insights
+### Phase 3 - Analytics & Reporting
+- Market-level rollup dashboards
+- Trend analysis and forecasting
+- Advanced coaching automation
+- Mobile responsive design
+
+### Phase 4 - Enterprise Features
+- Multi-tenant architecture
+- Advanced integrations
+- AI-powered insights
+- Custom reporting builder
 
 ---
 

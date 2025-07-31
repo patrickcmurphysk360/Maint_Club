@@ -112,7 +112,20 @@ router.post('/', async (req, res) => {
     // Check permissions based on role and goal type
     const canSetGoals = await checkGoalPermissions(req.user, goalType, entityId, pool);
     if (!canSetGoals) {
-      return res.status(403).json({ message: 'You do not have permission to set goals for this entity' });
+      console.error('Goal permission denied:', {
+        user: req.user,
+        goalType,
+        entityId,
+        userRole: req.user.role
+      });
+      return res.status(403).json({ 
+        message: 'You do not have permission to set goals for this entity',
+        details: {
+          userRole: req.user.role,
+          goalType,
+          entityId
+        }
+      });
     }
     
     // Validate input
@@ -204,43 +217,70 @@ router.post('/', async (req, res) => {
 
 // Helper function to check goal permissions
 async function checkGoalPermissions(user, goalType, entityId, pool) {
-  switch (user.role) {
-    case 'admin':
-      return true;
-      
-    case 'marketManager':
-      if (goalType === 'market') {
-        // Check if user manages this market
-        const result = await pool.query(
-          'SELECT 1 FROM user_markets WHERE user_id = $1 AND market_id = $2',
-          [user.id, entityId]
-        );
-        return result.rows.length > 0;
-      }
-      return false;
-      
-    case 'storeManager':
-      if (goalType === 'store') {
-        // Check if user manages this store
-        const result = await pool.query(
-          'SELECT 1 FROM user_stores WHERE user_id = $1 AND store_id = $2',
-          [user.id, entityId]
-        );
-        return result.rows.length > 0;
-      } else if (goalType === 'advisor') {
-        // Store managers can set goals for advisors in their store
-        const result = await pool.query(`
-          SELECT 1 
-          FROM advisor_mappings am
-          JOIN user_stores us ON us.store_id = am.store_id
-          WHERE us.user_id = $1 AND am.user_id = $2
-        `, [user.id, entityId]);
-        return result.rows.length > 0;
-      }
-      return false;
-      
-    default:
-      return false;
+  try {
+    // Handle different role naming conventions
+    const normalizedRole = user.role ? user.role.toLowerCase().replace('_', '') : '';
+    
+    console.log('Checking goal permissions:', {
+      role: user.role,
+      normalizedRole,
+      goalType,
+      entityId,
+      userId: user.id
+    });
+    
+    switch (normalizedRole) {
+      case 'admin':
+      case 'administrator':
+        return true;
+        
+      case 'marketmanager':
+      case 'market_manager':
+        if (goalType === 'market') {
+          // Check if user manages this market
+          const result = await pool.query(
+            'SELECT 1 FROM user_market_assignments WHERE user_id = $1 AND market_id = $2',
+            [user.id, entityId]
+          );
+          return result.rows.length > 0;
+        }
+        // Market managers can also set goals for stores and advisors in their markets
+        if (goalType === 'store') {
+          const result = await pool.query(`
+            SELECT 1 FROM stores s
+            JOIN user_market_assignments uma ON s.market_id::text = uma.market_id
+            WHERE uma.user_id = $1 AND s.id = $2
+          `, [user.id, entityId]);
+          return result.rows.length > 0;
+        }
+        if (goalType === 'advisor') {
+          // Can set goals for any advisor
+          return true;
+        }
+        return false;
+        
+      case 'storemanager':
+      case 'store_manager':
+        if (goalType === 'store') {
+          // Check if user manages this store
+          const result = await pool.query(
+            'SELECT 1 FROM user_store_assignments WHERE user_id = $1 AND store_id = $2',
+            [user.id, entityId]
+          );
+          return result.rows.length > 0;
+        } else if (goalType === 'advisor') {
+          // Store managers can set goals for any advisor
+          return true;
+        }
+        return false;
+        
+      default:
+        console.log('No permission match for role:', normalizedRole);
+        return false;
+    }
+  } catch (error) {
+    console.error('Error checking goal permissions:', error);
+    return false;
   }
 }
 

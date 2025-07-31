@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { AdvisorScorecardData } from '../../types/scorecard';
+import { SERVICE_CATEGORIES } from '../../constants/serviceCategories';
 
 interface GoalSettingModalProps {
   isOpen: boolean;
@@ -21,18 +22,29 @@ const GoalSettingModal: React.FC<GoalSettingModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const metrics = [
+  // Core KPIs
+  const coreMetrics = [
     { value: 'totalSales', label: 'Total Sales', current: advisor.totalSales },
     { value: 'salesPerVehicle', label: 'Sales per Vehicle', current: advisor.salesPerVehicle },
     { value: 'grossProfit', label: 'Gross Profit', current: advisor.grossProfit },
     { value: 'grossProfitPercent', label: 'Gross Profit %', current: advisor.grossProfitPercent },
-    { value: 'customerCount', label: 'Customer Count', current: advisor.customerCount },
-    { value: 'premiumOilChange', label: 'Premium Oil Change', current: advisor.premiumOilChange },
-    { value: 'standardOilChange', label: 'Standard Oil Change', current: advisor.standardOilChange },
-    { value: 'fuelAdditive', label: 'Fuel Additive', current: advisor.fuelAdditive },
-    { value: 'alignment', label: 'Alignment', current: advisor.alignment },
-    { value: 'battery', label: 'Battery', current: advisor.battery }
+    { value: 'customerCount', label: 'Customer Count', current: advisor.customerCount }
   ];
+
+  // Get service value from advisor data
+  const getServiceValue = (serviceKey: string): number => {
+    return (advisor as any)[serviceKey] || 0;
+  };
+
+  // Service metrics organized by category
+  const serviceMetrics = SERVICE_CATEGORIES.map(category => ({
+    category: category.name,
+    metrics: category.services.map(service => ({
+      value: service.key,
+      label: service.label,
+      current: getServiceValue(service.key)
+    }))
+  }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,10 +105,23 @@ const GoalSettingModal: React.FC<GoalSettingModalProps> = ({
                 required
               >
                 <option value="">Select a metric</option>
-                {metrics.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label} (Current: {m.current})
-                  </option>
+                
+                <optgroup label="Core KPIs">
+                  {coreMetrics.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label} (Current: {m.current.toLocaleString()})
+                    </option>
+                  ))}
+                </optgroup>
+                
+                {serviceMetrics.map((categoryGroup) => (
+                  <optgroup key={categoryGroup.category} label={categoryGroup.category}>
+                    {categoryGroup.metrics.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label} (Current: {m.current})
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </div>

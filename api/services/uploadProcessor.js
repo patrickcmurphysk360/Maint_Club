@@ -558,9 +558,35 @@ class UploadProcessor {
           advisor.proposed_email || `${advisor.name.toLowerCase().replace(/\s+/g, '.')}@example.com`
         ]);
         mappings[advisor.name] = result.rows[0].id;
+        
+        // Create advisor mapping for the new user
+        await client.query(`
+          INSERT INTO advisor_mappings (advisor_name, user_id, is_active)
+          VALUES ($1, $2, true)
+          ON CONFLICT (advisor_name) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            updated_at = CURRENT_TIMESTAMP,
+            is_active = true
+        `, [advisor.name, result.rows[0].id]);
+        
+        console.log(`📝 Created advisor mapping for new user: ${advisor.name} -> ${result.rows[0].id}`);
       } else if (advisor.action === 'map_user') {
         // Map to existing user
         mappings[advisor.name] = advisor.existing_user_id;
+        
+        // Create advisor mapping if it doesn't exist (for fuzzy-matched advisors)
+        if (advisor.mappingSource === 'fuzzy_matching') {
+          await client.query(`
+            INSERT INTO advisor_mappings (advisor_name, user_id, is_active)
+            VALUES ($1, $2, true)
+            ON CONFLICT (advisor_name) DO UPDATE SET
+              user_id = EXCLUDED.user_id,
+              updated_at = CURRENT_TIMESTAMP,
+              is_active = true
+          `, [advisor.name, advisor.existing_user_id]);
+          
+          console.log(`📝 Created advisor mapping: ${advisor.name} -> ${advisor.existing_user_id}`);
+        }
       }
     }
 
@@ -590,17 +616,18 @@ class UploadProcessor {
         console.log(`👤 Processing employee: ${employee.employeeName}, market: ${employee.market} -> ID: ${marketId} (type: ${typeof marketId})`);
         console.log(`🏪 Store lookup: key="${storeKey}" -> ID: ${storeId} (type: ${typeof storeId})`);
 
-        // Store performance data - set store_id to NULL since spreadsheet doesn't contain store IDs
+        // Store performance data with proper market_id, store_id, and advisor_user_id
         // Convert advisor_user_id to integer or null
         const advisorId = (typeof advisorUserId === 'number') ? advisorUserId : null;
         
         await client.query(`
           INSERT INTO performance_data 
           (upload_date, data_type, market_id, store_id, advisor_user_id, data)
-          VALUES ($1, 'services', $2, NULL, $3, $4)
+          VALUES ($1, 'services', $2, $3, $4, $5)
         `, [
           session.report_date,
           marketId,
+          storeId, // Now properly storing store_id
           advisorId,
           JSON.stringify(employee)
         ]);

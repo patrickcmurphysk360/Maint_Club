@@ -11,6 +11,7 @@ import {
   BuildingOfficeIcon,
   TagIcon,
   WrenchScrewdriverIcon,
+  Cog6ToothIcon,
   Bars3Icon,
   XMarkIcon,
   ArrowLeftOnRectangleIcon,
@@ -52,6 +53,12 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
 
   const adminTools: NavigationItem[] = [
     {
+      id: 'data-management',
+      label: 'Data Management',
+      icon: ChartBarIcon,
+      roles: ['administrator'],
+    },
+    {
       id: 'phase1',
       label: 'User Management',
       icon: UsersIcon,
@@ -79,6 +86,12 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
       id: 'services',
       label: 'Service Management',
       icon: WrenchScrewdriverIcon,
+      roles: ['administrator'],
+    },
+    {
+      id: 'scorecard-templates',
+      label: 'Scorecard Templates',
+      icon: Cog6ToothIcon,
       roles: ['administrator'],
     },
   ];

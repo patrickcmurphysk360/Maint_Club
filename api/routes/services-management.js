@@ -444,4 +444,82 @@ router.post('/validate-formula', async (req, res) => {
   }
 });
 
+// PUT rename category
+router.put('/categories/rename', async (req, res) => {
+  try {
+    const { oldCategory, newCategory } = req.body;
+    
+    if (!oldCategory || !newCategory) {
+      return res.status(400).json({ message: 'Both old and new category names are required' });
+    }
+    
+    // Check if new category name already exists
+    const existingCheck = await pool.query(
+      'SELECT COUNT(DISTINCT service_category) FROM service_catalog WHERE service_category = $1',
+      [newCategory]
+    );
+    
+    if (parseInt(existingCheck.rows[0].count) > 0) {
+      return res.status(400).json({ message: 'A category with this name already exists' });
+    }
+    
+    // Update all services in the old category to the new category name
+    const result = await pool.query(
+      'UPDATE service_catalog SET service_category = $1 WHERE service_category = $2 RETURNING *',
+      [newCategory, oldCategory]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+    
+    res.json({ 
+      message: `Successfully renamed category from "${oldCategory}" to "${newCategory}"`,
+      updatedCount: result.rows.length 
+    });
+  } catch (error) {
+    console.error('Error renaming category:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PUT merge categories
+router.put('/categories/merge', async (req, res) => {
+  try {
+    const { sourceCategory, targetCategory } = req.body;
+    
+    if (!sourceCategory || !targetCategory) {
+      return res.status(400).json({ message: 'Both source and target categories are required' });
+    }
+    
+    if (sourceCategory === targetCategory) {
+      return res.status(400).json({ message: 'Cannot merge a category with itself' });
+    }
+    
+    // Check if both categories exist
+    const categoryCheck = await pool.query(
+      'SELECT DISTINCT service_category FROM service_catalog WHERE service_category IN ($1, $2)',
+      [sourceCategory, targetCategory]
+    );
+    
+    if (categoryCheck.rows.length < 2) {
+      return res.status(404).json({ message: 'One or both categories not found' });
+    }
+    
+    // Update all services from source category to target category
+    const result = await pool.query(
+      'UPDATE service_catalog SET service_category = $1 WHERE service_category = $2 RETURNING *',
+      [targetCategory, sourceCategory]
+    );
+    
+    res.json({ 
+      message: `Successfully merged "${sourceCategory}" into "${targetCategory}"`,
+      updatedCount: result.rows.length 
+    });
+  } catch (error) {
+    console.error('Error merging categories:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;

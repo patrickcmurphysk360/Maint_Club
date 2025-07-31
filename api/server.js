@@ -17,6 +17,8 @@ const goalsRoutes = require('./routes/goals');
 const coachingRoutes = require('./routes/coaching-enhanced');
 const exportRoutes = require('./routes/export');
 const usersRoutes = require('./routes/users');
+const advisorMappingsRoutes = require('./routes/advisor-mappings');
+const scorecardTemplatesRoutes = require('./routes/scorecard-templates');
 
 // Additional routes
 const enhancedUploadRoutes = require('./routes/enhanced-upload');
@@ -24,6 +26,7 @@ const serviceCatalogRoutes = require('./routes/service-catalog');
 const servicesManagementRoutes = require('./routes/services-management');
 const marketsRoutes = require('./routes/markets');
 const storesRoutes = require('./routes/stores');
+const dataManagementRoutes = require('./routes/data-management');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -47,7 +50,7 @@ console.log('Database config:', {
 
 const pool = new Pool({
   user: 'admin',
-  host: 'postgres',
+  host: process.env.POSTGRES_HOST || 'localhost',
   database: 'maintenance_club_mvp',
   password: 'ducks2020',
   port: 5432,
@@ -97,6 +100,8 @@ app.use('/api/goals', authenticateToken, goalsRoutes);
 app.use('/api/coaching', authenticateToken, coachingRoutes);
 app.use('/api/export', authenticateToken, exportRoutes);
 app.use('/api/users', authenticateToken, usersRoutes);
+app.use('/api/advisor-mappings', authenticateToken, advisorMappingsRoutes);
+app.use('/api/scorecard-templates', authenticateToken, scorecardTemplatesRoutes);
 
 // Additional routes
 app.use('/api/enhanced-upload', authenticateToken, enhancedUploadRoutes);
@@ -104,6 +109,7 @@ app.use('/api/service-catalog', authenticateToken, serviceCatalogRoutes);
 app.use('/api/services-management', authenticateToken, servicesManagementRoutes);
 app.use('/api/markets', authenticateToken, marketsRoutes);
 app.use('/api/stores', authenticateToken, storesRoutes);
+app.use('/api/data-management', authenticateToken, dataManagementRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

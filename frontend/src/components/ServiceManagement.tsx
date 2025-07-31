@@ -32,6 +32,13 @@ const ServiceManagement: React.FC = () => {
   const [showCalculatedOnly, setShowCalculatedOnly] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [categoryOperation, setCategoryOperation] = useState<'rename' | 'merge' | null>(null);
+  const [categoryForm, setCategoryForm] = useState({
+    oldCategory: '',
+    newCategory: '',
+    targetCategory: ''
+  });
   
   // Form states
   const [formData, setFormData] = useState({
@@ -225,6 +232,53 @@ const ServiceManagement: React.FC = () => {
     }
   };
 
+  const handleCategoryRename = async () => {
+    if (!categoryForm.oldCategory || !categoryForm.newCategory) {
+      setError('Please select a category to rename and enter a new name');
+      return;
+    }
+
+    try {
+      await api.put('/services-management/categories/rename', {
+        oldCategory: categoryForm.oldCategory,
+        newCategory: categoryForm.newCategory
+      });
+      
+      alert(`Successfully renamed "${categoryForm.oldCategory}" to "${categoryForm.newCategory}"`);
+      setCategoryForm({ oldCategory: '', newCategory: '', targetCategory: '' });
+      setCategoryOperation(null);
+      loadData();
+    } catch (err) {
+      setError('Failed to rename category');
+    }
+  };
+
+  const handleCategoryMerge = async () => {
+    if (!categoryForm.oldCategory || !categoryForm.targetCategory) {
+      setError('Please select categories to merge');
+      return;
+    }
+
+    if (categoryForm.oldCategory === categoryForm.targetCategory) {
+      setError('Cannot merge a category with itself');
+      return;
+    }
+
+    try {
+      await api.put('/services-management/categories/merge', {
+        sourceCategory: categoryForm.oldCategory,
+        targetCategory: categoryForm.targetCategory
+      });
+      
+      alert(`Successfully merged "${categoryForm.oldCategory}" into "${categoryForm.targetCategory}"`);
+      setCategoryForm({ oldCategory: '', newCategory: '', targetCategory: '' });
+      setCategoryOperation(null);
+      loadData();
+    } catch (err) {
+      setError('Failed to merge categories');
+    }
+  };
+
   if (loading) {
     return <div className="p-4">Loading services...</div>;
   }
@@ -233,17 +287,144 @@ const ServiceManagement: React.FC = () => {
     <div className="p-4">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Service Management</h2>
-        <button
-          onClick={handleCreate}
-          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-        >
-          Add New Service
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCategoryManager(!showCategoryManager)}
+            className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+          >
+            Manage Categories
+          </button>
+          <button
+            onClick={handleCreate}
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          >
+            Add New Service
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
           {error}
+        </div>
+      )}
+
+      {/* Category Manager */}
+      {showCategoryManager && (
+        <div className="bg-white p-4 rounded shadow mb-6">
+          <h3 className="text-lg font-bold mb-4">Category Management</h3>
+          
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-2">Select Operation</label>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setCategoryOperation('rename')}
+                className={`px-4 py-2 rounded ${
+                  categoryOperation === 'rename'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-200 hover:bg-gray-300'
+                }`}
+              >
+                Rename Category
+              </button>
+              <button
+                onClick={() => setCategoryOperation('merge')}
+                className={`px-4 py-2 rounded ${
+                  categoryOperation === 'merge'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-200 hover:bg-gray-300'
+                }`}
+              >
+                Merge Categories
+              </button>
+            </div>
+          </div>
+
+          {categoryOperation === 'rename' && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Category to Rename</label>
+                <select
+                  value={categoryForm.oldCategory}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, oldCategory: e.target.value })}
+                  className="w-full border rounded px-3 py-2"
+                >
+                  <option value="">Select a category</option>
+                  {categories.map((cat) => (
+                    <option key={cat.service_category} value={cat.service_category}>
+                      {cat.service_category} ({cat.service_count} services)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">New Name</label>
+                <input
+                  type="text"
+                  value={categoryForm.newCategory}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, newCategory: e.target.value })}
+                  className="w-full border rounded px-3 py-2"
+                  placeholder="Enter new category name"
+                />
+              </div>
+              <div className="col-span-2">
+                <button
+                  onClick={handleCategoryRename}
+                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                >
+                  Rename Category
+                </button>
+              </div>
+            </div>
+          )}
+
+          {categoryOperation === 'merge' && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Category to Merge From</label>
+                <select
+                  value={categoryForm.oldCategory}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, oldCategory: e.target.value })}
+                  className="w-full border rounded px-3 py-2"
+                >
+                  <option value="">Select source category</option>
+                  {categories.map((cat) => (
+                    <option key={cat.service_category} value={cat.service_category}>
+                      {cat.service_category} ({cat.service_count} services)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Merge Into Category</label>
+                <select
+                  value={categoryForm.targetCategory}
+                  onChange={(e) => setCategoryForm({ ...categoryForm, targetCategory: e.target.value })}
+                  className="w-full border rounded px-3 py-2"
+                >
+                  <option value="">Select target category</option>
+                  {categories
+                    .filter(cat => cat.service_category !== categoryForm.oldCategory)
+                    .map((cat) => (
+                      <option key={cat.service_category} value={cat.service_category}>
+                        {cat.service_category} ({cat.service_count} services)
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <button
+                  onClick={handleCategoryMerge}
+                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                >
+                  Merge Categories
+                </button>
+                <p className="text-sm text-gray-500 mt-2">
+                  This will move all services from "{categoryForm.oldCategory}" to "{categoryForm.targetCategory}"
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

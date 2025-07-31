@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import { useAuth } from '../contexts/AuthContext';
 import { performanceAPI, scorecardAPI } from '../services/api';
 import { AdvisorScorecard, FileUpload, User } from '../types';
@@ -10,8 +11,10 @@ import VendorManagement from '../components/VendorManagement';
 import ServiceManagement from '../components/ServiceManagement';
 import AdvisorScorecards from '../components/Scorecard/AdvisorScorecards';
 import PersonalScorecard from '../components/Scorecard/PersonalScorecard';
+import ScorecardTemplateManager from '../components/Scorecard/ScorecardTemplateManager';
 import UploadConfirmation from '../components/UploadConfirmation';
 import Sidebar from '../components/Sidebar';
+import DataManagerDashboard from '../components/DataManagement/DataManagerDashboard';
 
 const Dashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -129,6 +132,9 @@ const Dashboard: React.FC = () => {
 
   const renderAdminTabContent = () => {
     switch (activeTab) {
+      case 'data-management':
+        return <DataManagerDashboard />;
+      
       case 'phase1':
         return <UserManagement />;
       
@@ -141,42 +147,35 @@ const Dashboard: React.FC = () => {
       case 'overview':
         return (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="card">
-                <h3 className="text-lg font-semibold mb-4">📊 Upload Services Data</h3>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={(e) => {
-                    if (e.target.files?.[0]) {
-                      handleFileUpload(e.target.files[0], 'services');
-                    }
-                  }}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
-                />
-                <p className="text-xs text-gray-500 mt-2">
-                  <strong>New format:</strong> "market_id-YYYY-MM-DD-time-Services-hash.xlsx"<br />
-                  <strong>Legacy:</strong> "Market - System - Services - YYYY-MM-DD.xlsx"
-                </p>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <InformationCircleIcon className="h-5 w-5 text-blue-600 mr-2 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-medium text-blue-800">Data Management Available</h4>
+                  <p className="text-blue-700 text-sm mt-1">
+                    Use the new <strong>Data Management</strong> section in Admin Tools for enhanced upload capabilities with auto-detection, mapping management, and troubleshooting.
+                  </p>
+                </div>
               </div>
-              
-              <div className="card">
-                <h3 className="text-lg font-semibold mb-4">🏪 Upload Operations Data</h3>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={(e) => {
-                    if (e.target.files?.[0]) {
-                      handleFileUpload(e.target.files[0], 'operations');
-                    }
-                  }}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-success-50 file:text-success-700 hover:file:bg-success-100"
-                />
-                <p className="text-xs text-gray-500 mt-2">
-                  <strong>New format:</strong> "market_id-YYYY-MM-DD-time-Operations-hash.xlsx"<br />
-                  <strong>Legacy:</strong> "Market - System - Operations - YYYY-MM-DD.xlsx"
-                </p>
-              </div>
+            </div>
+            
+            <div className="card">
+              <h3 className="text-lg font-semibold mb-4">📊 Upload Services Data (MTD)</h3>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) {
+                    handleFileUpload(e.target.files[0], 'services');
+                  }
+                }}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                <strong>New format:</strong> "market_id-YYYY-MM-DD-time-Services-hash.xlsx"<br />
+                <strong>Legacy:</strong> "Market - System - Services - YYYY-MM-DD.xlsx"<br />
+                <strong>Content:</strong> Month-to-Date advisor performance rollups
+              </p>
             </div>
           </div>
         );
@@ -186,6 +185,9 @@ const Dashboard: React.FC = () => {
       
       case 'services':
         return <ServiceManagement />;
+      
+      case 'scorecard-templates':
+        return <ScorecardTemplateManager />;
       
       case 'coaching':
         return (

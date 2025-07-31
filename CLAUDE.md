@@ -40,23 +40,41 @@ C:\Users\patri\projects\
 - React with TypeScript and Tailwind CSS
 - RESTful API with Express.js
 
-## Recently Restored Features
+## Recently Restored/Integrated Features
 - Market Management with rich profile view
-- Service Management with calculated KPIs
+- Service Management with calculated KPIs (single source of truth)
 - Vendor tag system with color coding
 - Store Management with user assignments and role-based access
 - **User Management with sophisticated market/store assignment interface** ([Full Documentation](USER-MANAGEMENT-RESTORATION.md))
 - Store and user relationship management
+- **Scorecard Template System integrated with Services Management** (January 30, 2025)
+  - Dynamic categories from service catalog
+  - Support for calculated services
+  - Visual indicators for field metadata
+- **Service Category Management System** (January 30, 2025)
+  - Rename categories across all services
+  - Merge categories to consolidate services
+  - Automatic updates reflect in scorecard templates
+  - Visual service counts per category
+- **Unified Services Data Management System** (January 30, 2025)
+  - Comprehensive MTD advisor performance data upload and processing
+  - Enhanced advisor mapping with auto-recognition and persistence
+  - Database schema viewer and data verification tools
+  - Real-time monitoring and troubleshooting capabilities
+  - Complete data linkage verification (Market → Store → Advisor)
 
 ## Documentation & Restoration Records
+- **[PROJECT-STATUS.md](PROJECT-STATUS.md)** - Current project status and features (98% complete as of July 31, 2025)
 - **[USER-MANAGEMENT-RESTORATION.md](USER-MANAGEMENT-RESTORATION.md)** - Complete restoration of sophisticated user edit functionality
-- **[SERVICE-MANAGEMENT-CREATION.md]** - Service management with calculated KPIs (if exists)
-- **[MARKET-MANAGEMENT-RESTORATION.md]** - Market profile functionality restoration (if exists)
+- **[README.md](README.md)** - Main project documentation with API endpoints and setup instructions
+- **[UPLOAD-SYSTEM-FIX.md](UPLOAD-SYSTEM-FIX.md)** - Database column mismatch fix and upload system verification (July 31, 2025)
+- **[SCORECARD-SYSTEM-FIX.md](SCORECARD-SYSTEM-FIX.md)** - Complete fix for scorecard data display and vendor mapping (July 31, 2025)
 
 ## Common Issues
 - Database connection errors: Ensure postgres container is running
 - Missing services in dropdowns: Check service catalog seed data
 - Lost functionality: Check for overwritten components in archived/
+- **Upload failures**: Check `advisor_mappings` table uses `spreadsheet_name` column (NOT `advisor_name`)
 - **Before implementing new features**: Always check archived/ directories first
 - **When overwriting components**: Document what's being replaced and why
 

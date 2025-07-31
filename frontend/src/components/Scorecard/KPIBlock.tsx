@@ -1,6 +1,7 @@
 import React from 'react';
 import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import { KPIMetric } from '../../types/scorecard';
+import GoalIndicator from './GoalIndicator';
 
 interface KPIBlockProps {
   title: string;
@@ -61,6 +62,18 @@ const KPIBlock: React.FC<KPIBlockProps> = ({ title, metrics, className = '' }) =
                   {formatValue(metric.value, metric.format)}
                 </span>
               </div>
+              
+              {metric.goal && (
+                <div className="mt-2">
+                  <GoalIndicator
+                    actual={typeof metric.value === 'number' ? metric.value : 0}
+                    goal={metric.goal.target}
+                    format={metric.format}
+                    showValue={true}
+                    size="sm"
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>

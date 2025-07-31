@@ -2,7 +2,8 @@ export interface AdvisorScorecardData {
   id: string;
   employee: string;
   store: string;
-  marketId: string;
+  marketId: number | null; // Changed to numeric for template loading
+  marketName?: string; // Added for display purposes
   mappedUserId?: string;
   mappedUserName?: string;
   
@@ -23,14 +24,18 @@ export interface AdvisorScorecardData {
   wiperBlades: number;
   coolantFlush: number;
   brakeFluidFlush: number;
+  brakeService: number;
   transmissionFluidService: number;
   fuelAdditive: number;
+  fuelSystemService: number;
   powerSteeringFluidService: number;
   engineFlush: number;
   acVentService: number;
   alignment: number;
   tireRotation: number;
   battery: number;
+  differentialService: number;
+  allTires: number;
   
   // Metadata
   uploadDate?: string;
@@ -42,6 +47,9 @@ export interface AdvisorScorecardData {
     periodType: string;
     effectiveDate: string;
   }>;
+  
+  // Raw API service data for branded name lookup
+  rawApiServices?: Record<string, number>;
 }
 
 export interface KPIMetric {
@@ -49,6 +57,11 @@ export interface KPIMetric {
   value: number | string;
   format: 'currency' | 'percentage' | 'number';
   tooltip?: string;
+  goal?: {
+    target: number;
+    periodType: string;
+    effectiveDate: string;
+  };
 }
 
 export interface ServiceMetric {

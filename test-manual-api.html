@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manual API Test</title>
+</head>
+<body>
+    <h1>Manual API Test</h1>
+    <p>Open console (F12) and look for results...</p>
+    
+    <script>
+    console.log('🔍 Testing API endpoints manually...');
+    
+    // Test scorecard endpoint directly to trigger debug logs
+    console.log('🔍 Testing scorecard endpoint to trigger debug logs...');
+    
+    // Try to fetch a scorecard (this will fail without auth, but should trigger debug logs)
+    fetch('http://localhost:5002/api/scorecard/advisor/1')
+        .then(response => {
+            console.log('🔍 Scorecard endpoint status:', response.status);
+            console.log('Expected: 401 or 403 (needs authentication)');
+            return response.text();
+        })
+        .then(data => {
+            console.log('Scorecard endpoint response:', data);
+        })
+        .catch(error => {
+            console.error('❌ Error:', error);
+            console.log('This might be CORS or network issue');
+        });
+        
+    // Test if we can reach the frontend
+    console.log('Current page URL:', window.location.href);
+    console.log('Expected URL: http://localhost:3007');
+    </script>
+</body>
+</html>

@@ -72,10 +72,23 @@ router.post('/upload/services/discover', upload.single('file'), async (req, res)
       const existingUsers = await pool.query(
         'SELECT id, first_name, last_name, email FROM users WHERE role = \'advisor\' ORDER BY first_name, last_name'
       );
+      const existingAdvisorMappings = await pool.query(`
+        SELECT 
+          am.spreadsheet_name,
+          am.user_id,
+          u.first_name,
+          u.last_name,
+          u.email
+        FROM advisor_mappings am
+        LEFT JOIN users u ON am.user_id::text = u.id::text
+        WHERE am.is_active = true
+      `);
 
       // Apply intelligent matching to discovered entities
       console.log('🔍 Discovered markets from spreadsheet:', result.discovered.markets.map(m => m.name));
       console.log('📋 Existing markets in database:', existingMarkets.rows.map(m => `${m.id}: ${m.name}`));
+      console.log('👥 Existing advisor mappings:', existingAdvisorMappings.rows.map(m => `${m.advisor_name} -> ${m.user_id}`));
+      console.log('🔍 Discovered advisors from spreadsheet:', result.discovered.advisors.map(a => a.name));
       
       const enhancedDiscovered = {
         markets: result.discovered.markets.map(market => {
@@ -111,13 +124,39 @@ router.post('/upload/services/discover', upload.single('file'), async (req, res)
         }),
         
         advisors: result.discovered.advisors.map(advisor => {
+          // First, check if advisor is already mapped in advisor_mappings table
+          const existingMapping = existingAdvisorMappings.rows.find(mapping => 
+            mapping.spreadsheet_name === advisor.name
+          );
+          
+          if (existingMapping) {
+            // Advisor is already mapped - auto-map without confirmation
+            const mappedUser = {
+              id: existingMapping.user_id,
+              first_name: existingMapping.first_name,
+              last_name: existingMapping.last_name,
+              email: existingMapping.email
+            };
+            
+            return {
+              ...advisor,
+              suggestedMatch: mappedUser,
+              matchScore: 1.0,
+              action: 'map_user',
+              existing_user_id: existingMapping.user_id,
+              mappingSource: 'advisor_mappings_table'
+            };
+          }
+          
+          // If no existing mapping, fall back to fuzzy matching
           const match = processor.findBestAdvisorMatch(advisor.name, existingUsers.rows);
           return {
             ...advisor,
             suggestedMatch: match?.user,
             matchScore: match?.score,
             action: match && match.score > 0.8 ? 'map_user' : 'create_user',
-            existing_user_id: match?.user?.id
+            existing_user_id: match?.user?.id,
+            mappingSource: 'fuzzy_matching'
           };
         })
       };
@@ -135,7 +174,9 @@ router.post('/upload/services/discover', upload.single('file'), async (req, res)
           autoMatched: {
             markets: enhancedDiscovered.markets.filter(m => m.action === 'map').length,
             stores: enhancedDiscovered.stores.filter(s => s.action === 'map').length,
-            advisors: enhancedDiscovered.advisors.filter(a => a.action === 'map_user').length
+            advisors: enhancedDiscovered.advisors.filter(a => a.action === 'map_user').length,
+            advisorsFromMappings: enhancedDiscovered.advisors.filter(a => a.mappingSource === 'advisor_mappings_table').length,
+            advisorsFromFuzzy: enhancedDiscovered.advisors.filter(a => a.mappingSource === 'fuzzy_matching' && a.action === 'map_user').length
           }
         },
         existing: {

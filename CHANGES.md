@@ -1,6 +1,75 @@
 # Recent Changes - Maintenance Club MVP
 
-## 🔧 Service Mapping & Vendor Integration Fixes (2025-07-30)
+## 🔧 Scorecard System Fixes (2025-07-31)
+
+### Major Issues Fixed
+- **Upload System Database Column Mismatch:**
+  - Fixed `advisor_mappings` table using wrong column name
+  - Changed from `advisor_name` to `spreadsheet_name`
+  - Resolved "Failed to process services file" errors
+  - Successfully processed stuck upload sessions
+
+- **Scorecard Data Display Issues:**
+  - Fixed scorecards showing all zeros for performance data
+  - Resolved frontend filtering that excluded non-advisor roles
+  - Created new API endpoint to fetch all users with performance data
+  - Fixed service data mapping between API and frontend
+
+- **Field Label Display Issues:**
+  - Fixed field keys showing instead of labels (e.g., "coolantflush" → "Coolant Flush")
+  - Updated template display logic to use proper field labels
+  - Added intelligent fallback for missing labels
+
+- **Vendor Mapping System:**
+  - Fixed vendor-mapped service names not displaying
+  - Resolved case sensitivity issues between template keys and vendor mappings
+  - Modified API to include zero-value services with vendor mappings
+  - Implemented branded service name display (e.g., "BG Advanced Formula MOA®")
+
+### Technical Improvements
+- Added comprehensive debug logging to API
+- Enhanced frontend service mapping with template field key support
+- Improved error handling and validation
+- Updated TypeScript interfaces for better type safety
+
+## 🎯 Advisor Management & Goals System (2025-01-30)
+
+### New Features Implemented
+- **Edit User Profile from Scorecard:** Admins can now edit advisor profiles directly from scorecards
+  - Full user management (name, email, status, role)
+  - Store and market assignment management
+  - Permission-based visibility
+
+- **Advisor-to-User Mapping:** Complete mapping system for advisors
+  - Search and map existing users
+  - Create new users from advisor names
+  - Visual indicators for mapping status
+  - Remap functionality for changing assignments
+
+- **Enhanced Goal Setting:**
+  - Complete service list organized by category
+  - All 40+ services available for goal tracking
+  - Current values displayed in dropdown
+  - Organized by: Core KPIs, Oil & Fluid Services, Brake & Suspension, Engine & Performance, Climate & Electrical, Maintenance & Inspection
+
+- **Goal Display & Variance Tracking:**
+  - Visual indicators on scorecards (✓/✗)
+  - Variance calculations with percentages
+  - Color-coded performance (green/red)
+  - Goal indicators on both KPIs and services
+
+### Bug Fixes
+- Fixed advisor mapping modal error with undefined names
+- Added support for both firstName/lastName and first_name/last_name formats
+- Enhanced permission checking for goal setting (403 error debugging)
+- Fixed route registration for advisor-mappings endpoint
+
+### API Enhancements
+- **POST/PUT/GET /api/users:** Full CRUD operations for user management
+- **GET/POST/DELETE /api/advisor-mappings:** Advisor mapping management
+- **Enhanced /api/goals:** Better permission handling and error reporting
+
+## 🔧 Service Mapping & Vendor Integration Fixes (2025-01-30)
 
 ### Issues Resolved
 - **Market Management:** Fixed stores/users not displaying in market edit modal
