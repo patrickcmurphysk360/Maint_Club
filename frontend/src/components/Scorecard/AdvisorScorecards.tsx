@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { AdvisorScorecardData } from '../../types/scorecard';
 import AdvisorScorecard from './AdvisorScorecard';
+import StorePerformanceTabs from './StorePerformanceTabs';
 import GoalSettingModal from './GoalSettingModal';
 import EditAdvisorModal from './EditAdvisorModal';
 import AdvisorMappingModal from './AdvisorMappingModal';
@@ -45,6 +46,11 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStore, setSelectedStore] = useState('');
   const [selectedMarket, setSelectedMarket] = useState('');
+  const [selectedMtdMonth, setSelectedMtdMonth] = useState(() => {
+    // Default to current month
+    const now = new Date();
+    return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+  });
   const [error, setError] = useState('');
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [selectedAdvisorForGoal, setSelectedAdvisorForGoal] = useState<AdvisorScorecardData | null>(null);
@@ -58,7 +64,7 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
 
   useEffect(() => {
     loadAdvisors();
-  }, [token]);
+  }, [token, selectedMtdMonth]);
 
   useEffect(() => {
     filterAdvisors();
@@ -112,11 +118,11 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
     
     // Map API service names to template field keys (lowercase, as used in the template)
     const serviceMapping = {
-      // Core KPIs (these use exact field names)
-      invoices: 0, // Will be set from metrics, not services
-      sales: 0,    // Will be set from metrics, not services
-      gpsales: 0,  // Will be set from metrics, not services
-      gppercent: 0, // Will be set from metrics, not services
+      // Core KPIs - DON'T set these here, they come from metrics!
+      // invoices: 0, // Will be set from metrics, not services
+      // sales: 0,    // Will be set from metrics, not services
+      // gpsales: 0,  // Will be set from metrics, not services
+      // gppercent: 0, // Will be set from metrics, not services
       
       // Fluid Services
       coolantflush: apiServices['Coolant Flush'] || 0,
@@ -288,9 +294,13 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
       // Fetch scorecard data for each advisor
       for (const user of allUsers) {
         try {
-          console.log(`🔍 FRONTEND DEBUG: Fetching scorecard for user ${user.user_id} (${user.first_name} ${user.last_name})`);
+          console.log(`🔍 FRONTEND DEBUG: Fetching scorecard for user ${user.user_id} (${user.first_name} ${user.last_name}) for MTD month ${selectedMtdMonth}`);
+          
+          // Parse MTD month to year and month
+          const [mtdYear, mtdMonth] = selectedMtdMonth.split('-');
+          
           const scorecardResponse = await fetch(
-            `${process.env.REACT_APP_API_URL}/api/scorecard/advisor/${user.user_id}`,
+            `${process.env.REACT_APP_API_URL}/api/scorecard/advisor/${user.user_id}?mtdYear=${mtdYear}&mtdMonth=${mtdMonth}`,
             {
               headers: {
                 'Authorization': `Bearer ${token}`,
@@ -304,6 +314,13 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
           if (scorecardResponse.ok) {
             const scorecardData = await scorecardResponse.json();
             console.log(`🔍 FRONTEND DEBUG: Scorecard data for user ${user.user_id}:`, scorecardData);
+            console.log(`📊 METRICS DEBUG for ${user.first_name} ${user.last_name}:`, {
+              invoices: scorecardData.metrics?.invoices,
+              sales: scorecardData.metrics?.sales,
+              gpSales: scorecardData.metrics?.gpSales,
+              gpPercent: scorecardData.metrics?.gpPercent,
+              rawMetrics: scorecardData.metrics
+            });
             
             // Extract store and market info from user assignments
             const stores = user.store_assignments?.map(s => s.store_name).join(', ') || 'Pending Assignment';
@@ -605,10 +622,10 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
         <div>
           <h2 className="text-2xl font-bold text-gray-900 flex items-center">
             <UserGroupIcon className="h-8 w-8 mr-2 text-blue-600" />
-            Employee Scorecards
+            Advisor Scorecards
           </h2>
           <p className="text-gray-600 mt-1">
-            Performance metrics and service data for all employees with sales data
+            Performance metrics and service data for all advisors with sales data
           </p>
         </div>
         <button
@@ -669,6 +686,33 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
               ))}
             </select>
           </div>
+
+          {/* MTD Month Selector */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              MTD Month
+            </label>
+            <select
+              value={selectedMtdMonth}
+              onChange={(e) => setSelectedMtdMonth(e.target.value)}
+              className="form-input w-full"
+            >
+              {/* Generate last 12 months */}
+              {Array.from({ length: 12 }, (_, i) => {
+                const date = new Date();
+                date.setMonth(date.getMonth() - i);
+                const year = date.getFullYear();
+                const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                const value = `${year}-${month}`;
+                const label = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+                return (
+                  <option key={`${value}-${i}`} value={value}>
+                    {label} MTD
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
 
         {/* Results Summary */}
@@ -691,20 +735,42 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
         </div>
       ) : (
         <div className="space-y-8">
-          {filteredAdvisors.map((advisor) => (
-            <AdvisorScorecard
-              key={advisor.id}
-              advisor={advisor}
-              onMessageAdvisor={onMessageAdvisor}
-              onSetGoals={handleOpenGoalModal}
-              onEditProfile={handleEditProfile}
-              onMapAdvisor={handleMapAdvisor}
-              canSetGoals={canUserSetGoals()}
-              canEditProfile={canUserEditProfiles()}
-              className="border border-gray-200 rounded-lg p-6 bg-gray-50"
-              serviceMappings={serviceMappings}
-            />
-          ))}
+          {filteredAdvisors.map((advisor) => {
+            // Check if advisor works at multiple stores
+            const storeCount = advisor.store ? advisor.store.split(', ').length : 1;
+            const isMultiStore = storeCount > 1;
+            
+            return (
+              <div key={advisor.id} className="border border-gray-200 rounded-lg p-6 bg-gray-50">
+                {isMultiStore ? (
+                  // Use tabbed interface for multi-store advisors
+                  <StorePerformanceTabs
+                    advisor={advisor}
+                    selectedMtdMonth={selectedMtdMonth}
+                    onMessageAdvisor={onMessageAdvisor}
+                    onSetGoals={handleOpenGoalModal}
+                    onEditProfile={handleEditProfile}
+                    onMapAdvisor={handleMapAdvisor}
+                    canSetGoals={canUserSetGoals()}
+                    canEditProfile={canUserEditProfiles()}
+                    serviceMappings={serviceMappings}
+                  />
+                ) : (
+                  // Use regular scorecard for single-store advisors
+                  <AdvisorScorecard
+                    advisor={advisor}
+                    onMessageAdvisor={onMessageAdvisor}
+                    onSetGoals={handleOpenGoalModal}
+                    onEditProfile={handleEditProfile}
+                    onMapAdvisor={handleMapAdvisor}
+                    canSetGoals={canUserSetGoals()}
+                    canEditProfile={canUserEditProfiles()}
+                    serviceMappings={serviceMappings}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

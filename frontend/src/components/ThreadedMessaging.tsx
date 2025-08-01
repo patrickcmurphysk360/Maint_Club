@@ -82,18 +82,21 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
   const loadThreads = async () => {
     try {
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5002';
-      const response = await fetch(`${apiUrl}/api/phase1/coaching/threads`, {
+      const response = await fetch(`${apiUrl}/api/coaching/threads`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
       const data = await response.json();
       
+      // Ensure we have an array of threads
+      const allThreads = Array.isArray(data.threads) ? data.threads : [];
+      
       // Filter threads for selected advisor if admin
-      let filteredThreads = data.threads;
+      let filteredThreads = allThreads;
       if (user?.role === 'administrator' && selectedAdvisor) {
-        filteredThreads = data.threads.filter((t: MessageThread) => 
-          t.advisorUserId === selectedAdvisor.user_id
+        filteredThreads = allThreads.filter((t: MessageThread) => 
+          t.advisorUserId === (selectedAdvisor.user_id || selectedAdvisor.mappedUserId || selectedAdvisor.id)
         );
       }
       
@@ -105,21 +108,24 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
       }
     } catch (error) {
       console.error('Error loading threads:', error);
+      setThreads([]); // Ensure we have an empty array on error
     }
   };
 
   const loadMessages = async (threadId: number) => {
     try {
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5002';
-      const response = await fetch(`${apiUrl}/api/phase1/coaching/threads/${threadId}/messages`, {
+      const response = await fetch(`${apiUrl}/api/coaching/threads/${threadId}/messages`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
       const data = await response.json();
-      setMessages(data.messages);
+      const messagesList = Array.isArray(data.messages) ? data.messages : [];
+      setMessages(messagesList);
     } catch (error) {
       console.error('Error loading messages:', error);
+      setMessages([]); // Ensure we have an empty array on error
     }
   };
 
@@ -128,15 +134,18 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
     
     try {
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5002';
-      const response = await fetch(`${apiUrl}/api/phase1/coaching/threads`, {
+      const advisorUserId = selectedAdvisor.user_id || selectedAdvisor.mappedUserId || selectedAdvisor.id;
+      console.log('🔍 Creating thread for advisor:', advisorUserId, selectedAdvisor);
+      
+      const response = await fetch(`${apiUrl}/api/coaching/threads`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
-          advisorUserId: selectedAdvisor.user_id,
-          subject: `Coaching - ${selectedAdvisor.first_name} ${selectedAdvisor.last_name}`,
+          advisorUserId: advisorUserId,
+          subject: `Coaching - ${selectedAdvisor.first_name || selectedAdvisor.employee?.split(' ')[0]} ${selectedAdvisor.last_name || selectedAdvisor.employee?.split(' ').slice(1).join(' ')}`,
           message: newMessage
         })
       });
@@ -144,6 +153,10 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
       if (response.ok) {
         setNewMessage('');
         loadThreads();
+      } else {
+        const errorData = await response.json();
+        console.error('Thread creation failed:', response.status, errorData);
+        alert(`Failed to create thread: ${errorData.message || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Error creating thread:', error);
@@ -156,6 +169,8 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
     setLoading(true);
     try {
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:5002';
+      console.log('🔍 Sending message to thread:', currentThread.threadId, 'Message:', newMessage);
+      
       const formData = new FormData();
       formData.append('message', newMessage);
       if (replyTo) {
@@ -165,7 +180,7 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
         formData.append('attachment', selectedFile);
       }
 
-      const response = await fetch(`${apiUrl}/api/phase1/coaching/threads/${currentThread.threadId}/messages`, {
+      const response = await fetch(`${apiUrl}/api/coaching/threads/${currentThread.threadId}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -180,6 +195,10 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
         if (fileInputRef.current) fileInputRef.current.value = '';
         loadMessages(currentThread.threadId);
         loadThreads(); // Refresh thread list to update last message
+      } else {
+        const errorData = await response.json();
+        console.error('Message send failed:', response.status, errorData);
+        alert(`Failed to send message: ${errorData.message || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -227,17 +246,17 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
               <p className="text-sm">{message.message}</p>
             )}
             
-            {message.attachments && message.attachments.length > 0 && (
+            {message.attachments && Array.isArray(message.attachments) && message.attachments.length > 0 && (
               <div className="mt-2 space-y-2">
                 {message.attachments.map((attachment) => (
                   <div key={attachment.id} className="border rounded p-2 bg-white bg-opacity-20">
                     {attachment.fileType === 'image' ? (
                       <div>
                         <img 
-                          src={`${process.env.REACT_APP_API_URL || 'http://localhost:5002'}/api/phase1/coaching/attachments/${attachment.id}/view`}
+                          src={`${process.env.REACT_APP_API_URL || 'http://localhost:5002'}/api/coaching/attachments/${attachment.id}/view`}
                           alt={attachment.originalFilename}
                           className="max-w-full h-auto rounded cursor-pointer"
-                          onClick={() => window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5002'}/api/phase1/coaching/attachments/${attachment.id}/view`, '_blank')}
+                          onClick={() => window.open(`${process.env.REACT_APP_API_URL || 'http://localhost:5002'}/api/coaching/attachments/${attachment.id}/view`, '_blank')}
                         />
                         <p className="text-xs mt-1">{attachment.originalFilename}</p>
                       </div>
@@ -248,7 +267,7 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
                           <p className="text-xs opacity-75">{formatFileSize(attachment.fileSize)}</p>
                         </div>
                         <a
-                          href={`${process.env.REACT_APP_API_URL || 'http://localhost:5002'}/api/phase1/coaching/attachments/${attachment.id}`}
+                          href={`${process.env.REACT_APP_API_URL || 'http://localhost:5002'}/api/coaching/attachments/${attachment.id}`}
                           download={attachment.originalFilename}
                           className={`text-xs px-2 py-1 rounded ${
                             isOwnMessage 
@@ -293,7 +312,9 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
     <div className="space-y-6">
       <div className="card">
         <h3 className="text-lg font-semibold mb-4">
-          💬 Messages with {selectedAdvisor.first_name} {selectedAdvisor.last_name}
+          💬 Messages with {selectedAdvisor.first_name && selectedAdvisor.last_name ? 
+            `${selectedAdvisor.first_name} ${selectedAdvisor.last_name}` : 
+            selectedAdvisor.employee}
         </h3>
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-96">
@@ -301,7 +322,7 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
           <div className="lg:col-span-1 border-r border-gray-200 pr-4">
             <h4 className="font-medium mb-3">Conversations</h4>
             <div className="space-y-2 max-h-80 overflow-y-auto">
-              {threads.map((thread) => (
+              {threads && Array.isArray(threads) ? threads.map((thread) => (
                 <button
                   key={thread.threadId}
                   onClick={() => setCurrentThread(thread)}
@@ -327,8 +348,8 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
                     </span>
                   </div>
                 </button>
-              ))}
-              {threads.length === 0 && (
+              )) : null}
+              {threads && threads.length === 0 && (
                 <p className="text-sm text-gray-500">No conversations yet</p>
               )}
             </div>
@@ -339,7 +360,7 @@ const ThreadedMessaging: React.FC<ThreadedMessagingProps> = ({ selectedAdvisor }
             {currentThread ? (
               <div className="flex flex-col h-full">
                 <div className="flex-1 overflow-y-auto mb-4 max-h-64 border rounded p-3">
-                  {messages.map(renderMessage)}
+                  {messages && Array.isArray(messages) ? messages.map(renderMessage) : null}
                   <div ref={messagesEndRef} />
                 </div>
                 

@@ -294,6 +294,54 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
       );
     }
 
+    // Check if this was auto-processed
+    if (uploadResult.autoProcessed) {
+      return (
+        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-start">
+            <CheckCircleIcon className="h-5 w-5 text-green-600 mr-2 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="font-medium text-green-800">Upload Auto-Processed Successfully!</h4>
+              <p className="text-green-700 text-sm mt-1">{uploadResult.message}</p>
+              
+              <div className="mt-3 bg-green-100 rounded p-3">
+                <p className="text-sm font-medium text-green-800 mb-2">All entities were matched automatically:</p>
+                <div className="grid grid-cols-3 gap-4 text-sm text-green-700">
+                  <div>
+                    <span className="font-medium">Markets:</span>
+                    <span className="ml-1">{uploadResult.summary?.autoMatched?.markets || 0}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">Stores:</span>
+                    <span className="ml-1">{uploadResult.summary?.autoMatched?.stores || 0}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">Advisors:</span>
+                    <span className="ml-1">{uploadResult.summary?.autoMatched?.advisors || 0}</span>
+                  </div>
+                </div>
+                {uploadResult.processedCount && (
+                  <p className="text-sm text-green-700 mt-2">
+                    <span className="font-medium">Records Processed:</span> {uploadResult.processedCount}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-3 flex items-center justify-between p-3 bg-white border rounded">
+                <div>
+                  <span className="text-sm font-medium">Session ID:</span>
+                  <span className="ml-2 font-mono text-sm text-gray-600">{uploadResult.sessionId}</span>
+                </div>
+                <span className="text-sm text-green-600 font-medium">
+                  ✅ No Review Required
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
         <div className="flex items-start">
@@ -343,6 +391,31 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
                   <p className="text-xs text-blue-600 mt-2">
                     ✅ {uploadResult.summary.autoMatched.advisorsFromMappings} advisors auto-mapped from previous uploads
                   </p>
+                )}
+              </div>
+            )}
+
+            {uploadResult.unmatchedEntities && (
+              uploadResult.unmatchedEntities.markets?.length > 0 ||
+              uploadResult.unmatchedEntities.stores?.length > 0 ||
+              uploadResult.unmatchedEntities.advisors?.length > 0
+            ) && (
+              <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                <h5 className="font-medium text-yellow-800">Entities Requiring Review</h5>
+                {uploadResult.unmatchedEntities.markets?.length > 0 && (
+                  <div className="text-sm text-yellow-700 mt-2">
+                    <span className="font-medium">Markets:</span> {uploadResult.unmatchedEntities.markets.join(', ')}
+                  </div>
+                )}
+                {uploadResult.unmatchedEntities.stores?.length > 0 && (
+                  <div className="text-sm text-yellow-700 mt-1">
+                    <span className="font-medium">Stores:</span> {uploadResult.unmatchedEntities.stores.join(', ')}
+                  </div>
+                )}
+                {uploadResult.unmatchedEntities.advisors?.length > 0 && (
+                  <div className="text-sm text-yellow-700 mt-1">
+                    <span className="font-medium">New Advisors:</span> {uploadResult.unmatchedEntities.advisors.length} advisors need mapping
+                  </div>
                 )}
               </div>
             )}

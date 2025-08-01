@@ -24,6 +24,8 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [uploadSession, setUploadSession] = useState<any>(null);
   const [confirmationLoading, setConfirmationLoading] = useState(false);
+  const [selectedAdvisorForMessaging, setSelectedAdvisorForMessaging] = useState<any>(null);
+  const [showMessaging, setShowMessaging] = useState(false);
   
 
   useEffect(() => {
@@ -128,6 +130,16 @@ const Dashboard: React.FC = () => {
     setUploadSession(null);
   };
 
+  const handleMessageAdvisor = (advisor: any) => {
+    setSelectedAdvisorForMessaging(advisor);
+    setShowMessaging(true);
+  };
+
+  const handleCloseMessaging = () => {
+    setShowMessaging(false);
+    setSelectedAdvisorForMessaging(null);
+  };
+
 
 
   const renderAdminTabContent = () => {
@@ -191,12 +203,28 @@ const Dashboard: React.FC = () => {
       
       case 'coaching':
         return (
-          <AdvisorScorecards 
-            onMessageAdvisor={(advisor) => {
-              // TODO: Integrate with ThreadedMessaging component
-              console.log('Message advisor:', advisor);
-            }}
-          />
+          <div className="space-y-6">
+            {showMessaging && selectedAdvisorForMessaging ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-gray-900">
+                    💬 Messaging with {selectedAdvisorForMessaging.employee}
+                  </h2>
+                  <button
+                    onClick={handleCloseMessaging}
+                    className="btn btn-secondary"
+                  >
+                    ← Back to Scorecards
+                  </button>
+                </div>
+                <ThreadedMessaging selectedAdvisor={selectedAdvisorForMessaging} />
+              </div>
+            ) : (
+              <AdvisorScorecards 
+                onMessageAdvisor={handleMessageAdvisor}
+              />
+            )}
+          </div>
         );
       
       case 'reports':

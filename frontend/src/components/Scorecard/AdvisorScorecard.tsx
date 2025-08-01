@@ -67,6 +67,17 @@ const AdvisorScorecard: React.FC<AdvisorScorecardProps> = ({
   const currentDate = new Date();
   const monthName = currentDate.toLocaleDateString('en-US', { month: 'long' });
   const year = currentDate.getFullYear();
+  
+  // Calculate data date (typically file date - 1 day)
+  // For now, we'll show "as of" the day before the current date
+  // TODO: Get actual upload date from API and subtract 1 day
+  const dataDate = new Date(currentDate);
+  dataDate.setDate(dataDate.getDate() - 1);
+  const dataDateString = dataDate.toLocaleDateString('en-US', { 
+    month: 'long', 
+    day: 'numeric', 
+    year: 'numeric' 
+  });
 
   useEffect(() => {
     loadTemplate();
@@ -198,7 +209,7 @@ const AdvisorScorecard: React.FC<AdvisorScorecardProps> = ({
               📊 Month-to-Date Performance
             </h3>
             <p className="text-blue-700 text-sm">
-              Performance metrics for {monthName} {year} (as of {currentDate.toLocaleDateString()})
+              Performance metrics for {monthName} {year} (as of {dataDateString})
               {template && template.template_name && (
                 <span className="ml-2 text-xs bg-blue-100 px-2 py-1 rounded">
                   {template.template_name}

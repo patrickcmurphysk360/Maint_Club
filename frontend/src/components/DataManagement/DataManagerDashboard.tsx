@@ -23,6 +23,7 @@ import UploadMonitoring from './UploadMonitoring';
 import DataTroubleshooter from './DataTroubleshooter';
 import DatabaseSchemaViewer from './DatabaseSchemaViewer';
 import DataVerificationViewer from './DataVerificationViewer';
+import EntityConfirmation from './EntityConfirmation';
 
 interface UploadSession {
   id: string;
@@ -51,6 +52,7 @@ const DataManagerDashboard: React.FC = () => {
   const [dataStats, setDataStats] = useState<DataStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+  const [reviewingSessionId, setReviewingSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -138,21 +140,40 @@ const DataManagerDashboard: React.FC = () => {
   const handleSessionAction = async (sessionId: string, action: 'view' | 'cancel') => {
     if (action === 'cancel') {
       try {
-        await fetch(
+        console.log('🗑️ Attempting to cancel session:', sessionId);
+        const response = await fetch(
           `${process.env.REACT_APP_API_URL}/api/enhanced-upload/upload/session/${sessionId}`,
           {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
           }
         );
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(`Failed to cancel session: ${errorData.message || response.statusText}`);
+        }
+        
+        const result = await response.json();
+        console.log('✅ Session cancelled successfully:', result);
         loadDashboardData();
       } catch (error) {
-        console.error('Error cancelling session:', error);
+        console.error('❌ Error cancelling session:', error);
+        alert(`Failed to cancel session: ${error.message}`);
       }
     } else if (action === 'view') {
-      // Handle view session details
-      console.log('View session:', sessionId);
+      // Show the review interface for this session
+      setReviewingSessionId(sessionId);
     }
+  };
+
+  const handleReviewComplete = () => {
+    setReviewingSessionId(null);
+    loadDashboardData();
+  };
+
+  const handleReviewCancel = () => {
+    setReviewingSessionId(null);
   };
 
   const renderStatsCards = () => {
@@ -247,26 +268,35 @@ const DataManagerDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Services Data Management</h1>
-          <p className="text-gray-600">MTD advisor performance data upload, processing, and troubleshooting</p>
-        </div>
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={loadDashboardData}
-            disabled={loading}
-            className="btn btn-secondary flex items-center"
-          >
-            <ArrowPathIcon className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
-      </div>
+      {/* Show EntityConfirmation if reviewing a session */}
+      {reviewingSessionId ? (
+        <EntityConfirmation
+          sessionId={reviewingSessionId}
+          onComplete={handleReviewComplete}
+          onCancel={handleReviewCancel}
+        />
+      ) : (
+        <>
+          {/* Header */}
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Services Data Management</h1>
+              <p className="text-gray-600">MTD advisor performance data upload, processing, and troubleshooting</p>
+            </div>
+            <div className="flex items-center space-x-3">
+              <button
+                onClick={loadDashboardData}
+                disabled={loading}
+                className="btn btn-secondary flex items-center"
+              >
+                <ArrowPathIcon className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+          </div>
 
-      {/* Statistics Cards */}
-      {renderStatsCards()}
+          {/* Statistics Cards */}
+          {renderStatsCards()}
 
       {/* Pending Sessions Alert */}
       {pendingSessions.length > 0 && (
@@ -350,10 +380,12 @@ const DataManagerDashboard: React.FC = () => {
         </nav>
       </div>
 
-      {/* Active View Content */}
-      <div className="min-h-96">
-        {renderActiveView()}
-      </div>
+          {/* Active View Content */}
+          <div className="min-h-96">
+            {renderActiveView()}
+          </div>
+        </>
+      )}
     </div>
   );
 };

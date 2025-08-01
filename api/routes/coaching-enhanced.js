@@ -53,18 +53,24 @@ function getFileType(mimetype) {
 
 // Helper function to check coaching permissions
 async function checkCoachingPermission(user, advisorId, pool) {
-  if (user.role === 'admin') return true;
+  if (user.role === 'admin' || user.role === 'administrator') return true;
   
   if (user.role === 'advisor') {
-    return user.id === parseInt(advisorId);
+    // Get the correct user_id from database
+    const userResult = await pool.query('SELECT user_id FROM users WHERE id = $1', [user.id]);
+    if (userResult.rows.length === 0) return false;
+    const userIdStr = userResult.rows[0].user_id;
+    return userIdStr === advisorId.toString();
   }
   
-  if (user.role === 'marketManager' || user.role === 'storeManager') {
+  if (user.role === 'marketManager' || user.role === 'storeManager' || user.role === 'market_manager' || user.role === 'store_manager') {
+    const userIdNum = user.id; // user_store_assignments uses integer user IDs
+    const advisorIdNum = parseInt(advisorId); // Convert advisor ID to integer for user_store_assignments
     const result = await pool.query(`
-      SELECT 1 FROM user_stores us 
-      JOIN user_stores advisor_stores ON advisor_stores.store_id = us.store_id
+      SELECT 1 FROM user_store_assignments us 
+      JOIN user_store_assignments advisor_stores ON advisor_stores.store_id = us.store_id
       WHERE us.user_id = $1 AND advisor_stores.user_id = $2
-    `, [user.id, advisorId]);
+    `, [userIdNum, advisorIdNum]);
     return result.rows.length > 0;
   }
   
@@ -109,17 +115,23 @@ router.get('/threads', async (req, res) => {
       ) attachments ON attachments.thread_id = mt.id
     `;
     
-    const params = [req.user.id];
+    // Get the correct user_id from database
+    const currentUserResult = await pool.query('SELECT user_id FROM users WHERE id = $1', [req.user.id]);
+    const userIdStr = currentUserResult.rows.length > 0 ? currentUserResult.rows[0].user_id : req.user.id.toString();
+    const params = [userIdStr];
     
     // Filter based on user role
     if (req.user.role === 'advisor') {
       query += ` WHERE mt.advisor_user_id = $2`;
-      params.push(req.user.id);
-    } else if (req.user.role !== 'admin') {
+      params.push(userIdStr);
+    } else if (req.user.role !== 'admin' && req.user.role !== 'administrator') {
+      // For managers, we need to find advisors in their stores
+      // But advisor_user_id in message_threads is a string, and user_store_assignments uses integers
       query += ` WHERE mt.advisor_user_id IN (
-        SELECT us.user_id FROM user_stores us 
-        WHERE us.store_id IN (
-          SELECT store_id FROM user_stores WHERE user_id = $2
+        SELECT u.user_id FROM users u
+        JOIN user_store_assignments usa ON usa.user_id = u.id
+        WHERE usa.store_id IN (
+          SELECT store_id FROM user_store_assignments WHERE user_id = $2
         )
       )`;
       params.push(req.user.id);
@@ -229,7 +241,13 @@ router.post('/threads/:threadId/messages', upload.single('attachment'), async (r
     const pool = req.app.locals.pool;
     const { threadId } = req.params;
     const { message, parentMessageId } = req.body;
-    const userId = req.user.id;
+    
+    // Get the correct user_id from database since JWT might have wrong format
+    const currentUserResult = await pool.query('SELECT user_id FROM users WHERE id = $1', [req.user.id]);
+    if (currentUserResult.rows.length === 0) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    const userId = currentUserResult.rows[0].user_id;
     
     // Verify thread exists and user has access
     const threadCheck = await pool.query(`
@@ -278,7 +296,7 @@ router.post('/threads/:threadId/messages', upload.single('attachment'), async (r
         req.file.size,
         req.file.mimetype,
         getFileType(req.file.mimetype),
-        userId
+        req.user.id // message_attachments uses integer user ID for uploaded_by
       ]);
       
       attachment = attachmentResult.rows[0];
@@ -324,14 +342,34 @@ router.post('/threads', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { advisorUserId, subject, message } = req.body;
-    const userId = req.user.id;
+    
+    // Get the correct user_id from database since JWT might have wrong format
+    const currentUserResult = await pool.query('SELECT user_id FROM users WHERE id = $1', [req.user.id]);
+    if (currentUserResult.rows.length === 0) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    const userId = currentUserResult.rows[0].user_id;
     
     if (!advisorUserId || !message) {
       return res.status(400).json({ message: 'Advisor ID and message are required' });
     }
     
+    console.log('Creating thread - advisorUserId:', advisorUserId, 'userId:', userId, 'subject:', subject);
+    
+    // Convert advisor integer ID to user_id string if needed
+    let advisorUserIdStr = advisorUserId;
+    if (typeof advisorUserId === 'number' || /^\d+$/.test(advisorUserId)) {
+      const userResult = await pool.query('SELECT user_id FROM users WHERE id = $1', [advisorUserId]);
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ message: 'Advisor not found' });
+      }
+      advisorUserIdStr = userResult.rows[0].user_id;
+    }
+    console.log('Converted advisorUserId to:', advisorUserIdStr);
+    
     // Verify user has permission to message this advisor
-    const hasPermission = await checkCoachingPermission(req.user, advisorUserId, pool);
+    const hasPermission = await checkCoachingPermission(req.user, advisorUserIdStr, pool);
+    console.log('Permission check result:', hasPermission, 'for user role:', req.user.role);
     if (!hasPermission) {
       return res.status(403).json({ message: 'Access denied' });
     }
@@ -341,7 +379,7 @@ router.post('/threads', async (req, res) => {
       INSERT INTO message_threads (advisor_user_id, created_by, subject, message_count)
       VALUES ($1, $2, $3, 1)
       RETURNING id, created_at
-    `, [advisorUserId, userId, subject || 'New Coaching Thread']);
+    `, [advisorUserIdStr, userId, subject || 'New Coaching Thread']);
     
     const threadId = threadResult.rows[0].id;
     
@@ -350,7 +388,7 @@ router.post('/threads', async (req, res) => {
       INSERT INTO coaching_messages 
       (thread_id, advisor_user_id, author_user_id, message)
       VALUES ($1, $2, $3, $4)
-    `, [threadId, advisorUserId, userId, message]);
+    `, [threadId, advisorUserIdStr, userId, message]);
     
     res.status(201).json({
       threadId,
@@ -360,7 +398,12 @@ router.post('/threads', async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating thread:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Request body:', req.body);
+    console.error('User:', req.user);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 });
 

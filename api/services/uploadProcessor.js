@@ -406,23 +406,38 @@ class UploadProcessor {
 
     console.log('🔍 Confirmation data received:', JSON.stringify(confirmationData, null, 2));
 
+    // Convert frontend object format to array format if needed
+    const markets = Array.isArray(confirmationData.markets) 
+      ? confirmationData.markets 
+      : Object.values(confirmationData.markets);
+    
+    const stores = Array.isArray(confirmationData.stores) 
+      ? confirmationData.stores 
+      : Object.values(confirmationData.stores);
+    
+    const advisors = Array.isArray(confirmationData.advisors) 
+      ? confirmationData.advisors 
+      : Object.values(confirmationData.advisors);
+
+    console.log('🔄 Converted to arrays - Markets:', markets.length, 'Stores:', stores.length, 'Advisors:', advisors.length);
+
     // Start transaction
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
       // Create/update markets
-      const marketMappings = await this.processMarkets(client, confirmationData.markets);
+      const marketMappings = await this.processMarkets(client, markets);
       console.log('🗺️ Market mappings created:', marketMappings);
       
       // Create/update stores
-      const storeMappings = await this.processStores(client, confirmationData.stores, marketMappings);
+      const storeMappings = await this.processStores(client, stores, marketMappings);
       console.log('🏪 Store mappings created:', storeMappings);
       
       // Process advisors if services file
       let advisorMappings = {};
       if (session.file_type === 'services') {
-        advisorMappings = await this.processAdvisors(client, confirmationData.advisors, marketMappings, storeMappings);
+        advisorMappings = await this.processAdvisors(client, advisors, marketMappings, storeMappings);
       }
 
       // Process the actual data

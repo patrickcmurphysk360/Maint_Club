@@ -46,10 +46,22 @@ router.post('/upload/services/discover', upload.single('file'), async (req, res)
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    const { reportDate } = req.body;
-    if (!reportDate) {
-      return res.status(400).json({ message: 'Report date is required' });
+    // Parse date from filename instead of relying on frontend reportDate
+    const excelParser = new (require('../services/excelParser'))();
+    const fileInfo = excelParser.parseFileName(req.file.originalname);
+    
+    if (!fileInfo.isValid) {
+      return res.status(400).json({ 
+        message: 'Invalid filename format', 
+        error: fileInfo.error 
+      });
     }
+    
+    // Use parsed date from filename minus 1 day (MTD through prior day)
+    const mtdDate = new Date(fileInfo.date);
+    mtdDate.setDate(mtdDate.getDate() - 1);
+    const reportDate = mtdDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    console.log('📅 File date:', fileInfo.date.toISOString().split('T')[0], '→ MTD date:', reportDate, 'for file:', req.file.originalname);
 
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: 'User authentication required' });
@@ -161,30 +173,157 @@ router.post('/upload/services/discover', upload.single('file'), async (req, res)
         })
       };
 
-      // Clean up uploaded file
-      fs.unlinkSync(filePath);
-
-      res.json({
-        message: 'Services file parsed successfully',
-        sessionId: result.sessionId,
-        fileInfo: result.fileInfo,
-        discovered: enhancedDiscovered,
-        summary: {
-          ...result.summary,
-          autoMatched: {
-            markets: enhancedDiscovered.markets.filter(m => m.action === 'map').length,
-            stores: enhancedDiscovered.stores.filter(s => s.action === 'map').length,
-            advisors: enhancedDiscovered.advisors.filter(a => a.action === 'map_user').length,
-            advisorsFromMappings: enhancedDiscovered.advisors.filter(a => a.mappingSource === 'advisor_mappings_table').length,
-            advisorsFromFuzzy: enhancedDiscovered.advisors.filter(a => a.mappingSource === 'fuzzy_matching' && a.action === 'map_user').length
-          }
-        },
-        existing: {
-          markets: existingMarkets.rows,
-          stores: existingStores.rows,
-          users: existingUsers.rows
-        }
+      // Check if we can auto-process (all entities matched)
+      const allMarketsMatched = enhancedDiscovered.markets.every(m => m.action === 'map');
+      const allStoresMatched = enhancedDiscovered.stores.every(s => s.action === 'map');
+      const allAdvisorsMatched = enhancedDiscovered.advisors.every(a => a.action === 'map_user');
+      
+      let canAutoProcess = allMarketsMatched && allStoresMatched && allAdvisorsMatched;
+      
+      console.log('🚀 Auto-process check:', {
+        allMarketsMatched,
+        allStoresMatched,
+        allAdvisorsMatched,
+        canAutoProcess,
+        marketCount: enhancedDiscovered.markets.length,
+        storeCount: enhancedDiscovered.stores.length,
+        advisorCount: enhancedDiscovered.advisors.length
       });
+
+      // If everything matches, auto-process the upload
+      if (canAutoProcess) {
+        try {
+          console.log('✅ All entities matched! Auto-processing upload...');
+          
+          // Build confirmation data for auto-processing
+          // NOTE: UploadProcessor expects arrays, not objects with name keys
+          const autoConfirmData = {
+            markets: [],
+            stores: [],
+            advisors: []
+          };
+          
+          // Map markets - convert to array format
+          enhancedDiscovered.markets.forEach(market => {
+            autoConfirmData.markets.push({
+              name: market.name,
+              action: 'map',
+              existing_id: market.existing_id,
+              mappedTo: market.existing_id,
+              mappedName: market.suggestedMatch?.name,
+              source: market.source
+            });
+          });
+          
+          // Map stores - convert to array format
+          enhancedDiscovered.stores.forEach(store => {
+            autoConfirmData.stores.push({
+              name: store.name,
+              action: 'map',
+              existing_id: store.existing_id,
+              mappedTo: store.existing_id,
+              mappedName: store.suggestedMatch?.name,
+              market: store.market,
+              source: store.source
+            });
+          });
+          
+          // Map advisors - convert to array format
+          enhancedDiscovered.advisors.forEach(advisor => {
+            autoConfirmData.advisors.push({
+              name: advisor.name,
+              action: advisor.action, // Use the action from enhanced discovery (map_user or create_user)
+              existing_user_id: advisor.existing_user_id,
+              mappedTo: advisor.existing_user_id,
+              mappedUserName: advisor.suggestedMatch?.first_name + ' ' + advisor.suggestedMatch?.last_name,
+              store: advisor.store,
+              market: advisor.market,
+              hasData: advisor.hasData,
+              source: advisor.source,
+              mappingSource: advisor.mappingSource // Include mapping source info
+            });
+          });
+          
+          // Process the confirmation automatically
+          const processResult = await processor.confirmUploadSession(result.sessionId, autoConfirmData);
+          
+          // Update session status to completed
+          await pool.query(
+            'UPDATE upload_sessions SET status = $1 WHERE id = $2',
+            ['processed', result.sessionId]
+          );
+          
+          // Create file upload record for compatibility
+          await pool.query(`
+            INSERT INTO file_uploads (filename, file_type, upload_date, uploaded_by, status, processed_at)
+            VALUES ($1, $2, $3, $4, 'completed', CURRENT_TIMESTAMP)
+          `, [
+            req.file.originalname,
+            'services',
+            reportDate,
+            req.user.id
+          ]);
+          
+          // Clean up uploaded file
+          fs.unlinkSync(filePath);
+          
+          res.json({
+            message: 'Services file processed automatically - all entities matched!',
+            sessionId: result.sessionId,
+            fileInfo: result.fileInfo,
+            autoProcessed: true,
+            processedCount: processResult.processedCount,
+            summary: {
+              ...result.summary,
+              autoMatched: {
+                markets: enhancedDiscovered.markets.length,
+                stores: enhancedDiscovered.stores.length,
+                advisors: enhancedDiscovered.advisors.length,
+                advisorsFromMappings: enhancedDiscovered.advisors.filter(a => a.mappingSource === 'advisor_mappings_table').length
+              }
+            }
+          });
+          
+        } catch (autoProcessError) {
+          console.error('❌ Auto-process failed, falling back to manual review:', autoProcessError);
+          // If auto-process fails, fall back to manual review
+          canAutoProcess = false;
+        }
+      }
+      
+      // If not auto-processed, return for manual review
+      if (!canAutoProcess) {
+        // Clean up uploaded file
+        fs.unlinkSync(filePath);
+
+        res.json({
+          message: 'Services file parsed successfully',
+          sessionId: result.sessionId,
+          fileInfo: result.fileInfo,
+          discovered: enhancedDiscovered,
+          requiresReview: true,
+          unmatchedEntities: {
+            markets: enhancedDiscovered.markets.filter(m => m.action !== 'map').map(m => m.name),
+            stores: enhancedDiscovered.stores.filter(s => s.action !== 'map').map(s => s.name),
+            advisors: enhancedDiscovered.advisors.filter(a => a.action !== 'map_user').map(a => a.name)
+          },
+          summary: {
+            ...result.summary,
+            autoMatched: {
+              markets: enhancedDiscovered.markets.filter(m => m.action === 'map').length,
+              stores: enhancedDiscovered.stores.filter(s => s.action === 'map').length,
+              advisors: enhancedDiscovered.advisors.filter(a => a.action === 'map_user').length,
+              advisorsFromMappings: enhancedDiscovered.advisors.filter(a => a.mappingSource === 'advisor_mappings_table').length,
+              advisorsFromFuzzy: enhancedDiscovered.advisors.filter(a => a.mappingSource === 'fuzzy_matching' && a.action === 'map_user').length
+            }
+          },
+          existing: {
+            markets: existingMarkets.rows,
+            stores: existingStores.rows,
+            users: existingUsers.rows
+          }
+        });
+      }
 
     } catch (error) {
       // Clean up file on error
@@ -213,10 +352,22 @@ router.post('/upload/operations/discover', upload.single('file'), async (req, re
       return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    const { reportDate } = req.body;
-    if (!reportDate) {
-      return res.status(400).json({ message: 'Report date is required' });
+    // Parse date from filename instead of relying on frontend reportDate
+    const excelParser = new (require('../services/excelParser'))();
+    const fileInfo = excelParser.parseFileName(req.file.originalname);
+    
+    if (!fileInfo.isValid) {
+      return res.status(400).json({ 
+        message: 'Invalid filename format', 
+        error: fileInfo.error 
+      });
     }
+    
+    // Use parsed date from filename minus 1 day (MTD through prior day)
+    const mtdDate = new Date(fileInfo.date);
+    mtdDate.setDate(mtdDate.getDate() - 1);
+    const reportDate = mtdDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    console.log('📅 File date:', fileInfo.date.toISOString().split('T')[0], '→ MTD date:', reportDate, 'for operations file:', req.file.originalname);
 
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: 'User authentication required' });
@@ -382,16 +533,30 @@ router.delete('/upload/session/:sessionId', async (req, res) => {
     const pool = req.app.locals.pool;
     const { sessionId } = req.params;
 
-    await pool.query(`
+    console.log('🗑️ Attempting to cancel session:', sessionId);
+    
+    const result = await pool.query(`
       UPDATE upload_sessions 
       SET status = 'cancelled' 
       WHERE id = $1 AND status = 'pending_review'
+      RETURNING id, filename, status
     `, [sessionId]);
     
-    res.json({ message: 'Upload session cancelled' });
+    if (result.rowCount === 0) {
+      console.log('❌ Session not found or not pending:', sessionId);
+      return res.status(404).json({ 
+        message: 'Session not found or not in pending_review status' 
+      });
+    }
+    
+    console.log('✅ Session cancelled successfully:', result.rows[0]);
+    res.json({ 
+      message: 'Upload session cancelled', 
+      session: result.rows[0] 
+    });
 
   } catch (error) {
-    console.error('Cancel session error:', error);
+    console.error('❌ Cancel session error:', error);
     res.status(500).json({ 
       message: 'Failed to cancel session', 
       error: error.message 

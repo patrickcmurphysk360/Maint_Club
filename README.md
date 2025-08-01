@@ -2,7 +2,7 @@
 
 A performance management portal for automotive service shops with role-based access, vendor integration, and coaching features.
 
-**Last Updated:** January 30, 2025 | **Version:** 2.0.0 | **Status:** Phase 2 - Enhanced Features
+**Last Updated:** August 1, 2025 | **Version:** 3.0.0 | **Status:** Production-Ready MVP (100% Complete)
 
 ## 🚀 Quick Start
 
@@ -297,28 +297,39 @@ The MVP includes demo data:
 - **Vendor Mappings:** BG Products, NAPA, Valvoline
 - **Goals & Coaching:** Sample targets and messages
 
-## 🎯 Recent Updates (January 30, 2025)
+## 📚 Documentation
 
-### ✅ New Features Added
-- **Enhanced Advisor Management:** Edit profiles and map advisors to users directly from scorecards
-- **Comprehensive Goal System:** Set goals for 40+ services across 6 categories with visual tracking
-- **Advanced Permission System:** Role-based goal setting with detailed error handling
-- **Visual Performance Indicators:** Color-coded goal achievement status with variance percentages
-- **Services Management Integration:** Dynamic service catalog serves as single source of truth
-- **Scorecard Template System:** Market-specific templates with categories from Services Management
-- **Calculated Services Support:** Templates support calculated KPIs with formulas and dependencies
-- **Service Category Management:** Rename and merge service categories with automatic template updates
+### 📋 Main Documentation
+- **[PROJECT-STATUS.md](PROJECT-STATUS.md)** - Complete project status and feature tracking
+- **[CLAUDE.md](CLAUDE.md)** - AI assistant context and development guidelines
+- **[CHANGES.md](CHANGES.md)** - Version history and changelog
 
-### 🔧 Current Status
-- **95% Complete** - Production-ready MVP
-- Service categories now fully editable and manageable
-- Debugging goals API permission issue
-- All major features implemented and integrated
+### 🔧 Technical Documentation
+- **[docs/](docs/)** - Detailed technical documentation
+  - Implementation guides for major features
+  - Bug fix documentation and solutions
+  - Diagnostic procedures and troubleshooting
+  - System architecture and data flow diagrams
+
+### 🆕 Recent Updates (August 1, 2025)
+
+#### ✅ MTD Data Processing - COMPLETED
+- **Auto-Processing System:** Eliminates 15-minute manual review for known entities
+- **MTD Data Accuracy:** Latest upload per store only (no double-counting)
+- **Advisor-Level Tracking:** Service Writers tab processing fully operational
+- **Multi-Store Support:** Individual store tabs with accurate data separation
+
+#### 🎯 Current Status
+- **100% Complete** - Production-ready MVP
+- All core features operational and validated
+- Auto-processing working for spreadsheet uploads
+- MTD data processing accurate and reliable
 
 ## 🎉 What's Next?
 
 ### Phase 3 - Analytics & Reporting
-- Market-level rollup dashboards
+- Store-level performance processing (Store tab from spreadsheets)
+- Market-level performance processing (Market tab from spreadsheets)
 - Trend analysis and forecasting
 - Advanced coaching automation
 - Mobile responsive design
