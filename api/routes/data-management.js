@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
 
+// Test endpoint to verify route is working
+router.get('/test', (req, res) => {
+  res.json({ message: 'Data management route is working', timestamp: new Date() });
+});
+
 // GET /api/data-management/stats - Get data management statistics
 router.get('/stats', async (req, res) => {
   try {
@@ -93,7 +98,7 @@ router.get('/monitoring', async (req, res) => {
       '90d': 90
     }[range] || 30;
     
-    // Get upload statistics
+    // Get upload statistics - using safe string concatenation
     const uploadStatsQuery = `
       SELECT 
         COUNT(*) as total,
@@ -101,11 +106,11 @@ router.get('/monitoring', async (req, res) => {
         COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
         COUNT(CASE WHEN status = 'processing' THEN 1 END) as pending,
         CASE 
-          WHEN COUNT(*) > 0 THEN ROUND((COUNT(CASE WHEN status = 'completed' THEN 1 END)::float / COUNT(*)) * 100, 1)
+          WHEN COUNT(*) > 0 THEN ROUND(((COUNT(CASE WHEN status = 'completed' THEN 1 END)::float / COUNT(*)) * 100)::numeric, 1)
           ELSE 0 
         END as success_rate
       FROM file_uploads
-      WHERE upload_date >= CURRENT_DATE - INTERVAL '${days} days'
+      WHERE upload_date >= CURRENT_DATE - INTERVAL '` + days + ` days'
     `;
     
     // Get recent activity
@@ -116,7 +121,7 @@ router.get('/monitoring', async (req, res) => {
         COUNT(CASE WHEN status = 'completed' THEN 1 END) as success,
         COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
       FROM file_uploads
-      WHERE upload_date >= CURRENT_DATE - INTERVAL '${Math.min(days, 7)} days'
+      WHERE upload_date >= CURRENT_DATE - INTERVAL '` + Math.min(days, 7) + ` days'
       GROUP BY DATE(upload_date)
       ORDER BY date DESC
     `;
@@ -127,7 +132,7 @@ router.get('/monitoring', async (req, res) => {
         file_type,
         COUNT(*) as count
       FROM file_uploads
-      WHERE upload_date >= CURRENT_DATE - INTERVAL '${days} days'
+      WHERE upload_date >= CURRENT_DATE - INTERVAL '` + days + ` days'
       GROUP BY file_type
     `;
     
@@ -135,7 +140,7 @@ router.get('/monitoring', async (req, res) => {
     const advisorMappingStatsQuery = `
       SELECT 
         COUNT(*) as total_mappings,
-        COUNT(CASE WHEN created_at >= CURRENT_DATE - INTERVAL '${days} days' THEN 1 END) as recent_mappings,
+        COUNT(CASE WHEN created_at >= CURRENT_DATE - INTERVAL '` + days + ` days' THEN 1 END) as recent_mappings,
         COUNT(CASE WHEN user_id IS NOT NULL THEN 1 END) as manual_mapped,
         0 as auto_mapped
       FROM advisor_mappings
@@ -159,13 +164,13 @@ router.get('/monitoring', async (req, res) => {
     // Get processing times from actual upload data
     const processingTimesQuery = `
       SELECT 
-        AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/60) as avg_minutes,
-        MIN(EXTRACT(EPOCH FROM (updated_at - created_at))/60) as min_minutes,
-        MAX(EXTRACT(EPOCH FROM (updated_at - created_at))/60) as max_minutes
+        AVG(EXTRACT(EPOCH FROM (processed_at - created_at))/60) as avg_minutes,
+        MIN(EXTRACT(EPOCH FROM (processed_at - created_at))/60) as min_minutes,
+        MAX(EXTRACT(EPOCH FROM (processed_at - created_at))/60) as max_minutes
       FROM file_uploads
       WHERE status = 'completed'
-      AND upload_date >= CURRENT_DATE - INTERVAL '${days} days'
-      AND updated_at IS NOT NULL
+      AND upload_date >= CURRENT_DATE - INTERVAL '` + days + ` days'
+      AND processed_at IS NOT NULL
     `;
     
     // Get error categories from failed uploads
@@ -175,7 +180,7 @@ router.get('/monitoring', async (req, res) => {
         COUNT(*) as count
       FROM file_uploads
       WHERE status = 'failed'
-      AND upload_date >= CURRENT_DATE - INTERVAL '${days} days'
+      AND upload_date >= CURRENT_DATE - INTERVAL '` + days + ` days'
       AND error_message IS NOT NULL
       GROUP BY error_message
       ORDER BY count DESC
@@ -204,7 +209,7 @@ router.get('/monitoring', async (req, res) => {
     const fileTypeBreakdown = fileTypes.rows.reduce((acc, row) => {
       acc[row.file_type] = parseInt(row.count);
       return acc;
-    }, { services: 0 });
+    }, { services: 0, operations: 0 });
     
     // Format advisor mapping statistics
     const mappingStats = advisorMappingStats.rows[0];
@@ -246,8 +251,9 @@ router.get('/monitoring', async (req, res) => {
     
     res.json(monitoringData);
   } catch (error) {
-    console.error('Error fetching monitoring data:', error);
-    res.status(500).json({ error: 'Failed to fetch monitoring data' });
+    console.error('Error fetching monitoring data:', error.message);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ error: 'Failed to fetch monitoring data', details: error.message });
   }
 });
 
