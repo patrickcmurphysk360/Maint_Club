@@ -13,7 +13,8 @@ import {
   EyeIcon,
   TrashIcon,
   ChartBarIcon,
-  Cog6ToothIcon
+  Cog6ToothIcon,
+  ShieldCheckIcon
 } from '@heroicons/react/24/outline';
 import { useAuth } from '../../contexts/AuthContext';
 import UnifiedUploader from './UnifiedUploader';
@@ -23,6 +24,7 @@ import UploadMonitoring from './UploadMonitoring';
 import DataTroubleshooter from './DataTroubleshooter';
 import DatabaseSchemaViewer from './DatabaseSchemaViewer';
 import DataVerificationViewer from './DataVerificationViewer';
+import DataAuditViewer from './DataAuditViewer';
 import EntityConfirmation from './EntityConfirmation';
 
 interface UploadSession {
@@ -47,7 +49,7 @@ interface DataStats {
 
 const DataManagerDashboard: React.FC = () => {
   const { token } = useAuth();
-  const [activeView, setActiveView] = useState<'upload' | 'history' | 'mappings' | 'monitoring' | 'troubleshoot' | 'schema' | 'verification'>('upload');
+  const [activeView, setActiveView] = useState<'upload' | 'history' | 'mappings' | 'monitoring' | 'troubleshoot' | 'schema' | 'verification' | 'audit'>('upload');
   const [pendingSessions, setPendingSessions] = useState<UploadSession[]>([]);
   const [dataStats, setDataStats] = useState<DataStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -261,6 +263,8 @@ const DataManagerDashboard: React.FC = () => {
         return <DatabaseSchemaViewer />;
       case 'verification':
         return <DataVerificationViewer />;
+      case 'audit':
+        return <DataAuditViewer />;
       default:
         return <UnifiedUploader onUploadComplete={loadDashboardData} />;
     }
@@ -356,6 +360,7 @@ const DataManagerDashboard: React.FC = () => {
             { id: 'upload', label: 'Upload Services', icon: CloudArrowUpIcon },
             { id: 'history', label: 'Upload History', icon: FolderOpenIcon },
             { id: 'mappings', label: 'Advisor Mappings', icon: UserGroupIcon },
+            { id: 'audit', label: 'Data Audit', icon: ShieldCheckIcon },
             { id: 'verification', label: 'Data Verification', icon: CheckCircleIcon },
             { id: 'monitoring', label: 'Monitoring', icon: ChartBarIcon },
             { id: 'troubleshoot', label: 'Troubleshoot', icon: Cog6ToothIcon },

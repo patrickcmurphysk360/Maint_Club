@@ -339,17 +339,60 @@ class ExcelParser {
     // New format: "market_id-YYYY-MM-DD-time-type-hash.xlsx"
     // Example: "694-2025-07-24-6am-Services-YlxBy3y5-1753351620.xlsx"
     
+    // End-of-month format: "market_id-MonthName-YYYY-type-hash.xlsx"
+    // Example: "694-July-2025-Services-EmYXSQJW-1754042864.xlsx"
+    
     // Also support legacy format for backward compatibility
     // Legacy: "Market Name - System - Type - YYYY-MM-DD.xlsx"
     
     const base = filename.replace('.xlsx', '');
     
+    // Month names mapping
+    const monthNames = {
+      'january': 0, 'february': 1, 'march': 2, 'april': 3,
+      'may': 4, 'june': 5, 'july': 6, 'august': 7,
+      'september': 8, 'october': 9, 'november': 10, 'december': 11
+    };
+    
     // Check if it's the new format (contains numeric market_id at start)
     if (/^\d+-.+/.test(base)) {
       const tokens = base.split('-');
       
+      // Check for end-of-month format: market_id-MonthName-YYYY-type-hash
+      if (tokens.length >= 4) {
+        const marketId = tokens[0];
+        const potentialMonth = tokens[1].toLowerCase();
+        
+        // Check if second token is a month name
+        if (monthNames.hasOwnProperty(potentialMonth)) {
+          const monthIndex = monthNames[potentialMonth];
+          const year = tokens[2];
+          const type = tokens[3];
+          const hash = tokens.length > 4 ? tokens.slice(4).join('-') : '';
+          
+          // Validate year
+          if (year.length === 4 && !isNaN(parseInt(year))) {
+            // Calculate last day of the month
+            const lastDayOfMonth = new Date(parseInt(year), monthIndex + 1, 0);
+            
+            return {
+              marketId: marketId,
+              market: `Market ${marketId}`, // Fallback market name
+              date: lastDayOfMonth,
+              time: 'end-of-month',
+              type: type.toLowerCase(), // 'services' or 'operations'
+              hash: hash,
+              format: 'end-of-month',
+              isEndOfMonth: true,
+              monthName: tokens[1], // Original month name
+              isValid: true
+            };
+          }
+        }
+      }
+      
       if (tokens.length >= 6) {
-        // New format parsing
+        // Original new format parsing (daily files)
         const marketId = tokens[0];
         const year = tokens[1];
         const month = tokens[2];
@@ -373,6 +416,7 @@ class ExcelParser {
               type: type.toLowerCase(), // 'services' or 'operations'
               hash: hash,
               format: 'new',
+              isEndOfMonth: false,
               isValid: true
             };
           }
@@ -381,7 +425,7 @@ class ExcelParser {
       
       return {
         isValid: false,
-        error: 'Invalid new filename format. Expected: "market_id-YYYY-MM-DD-time-type-hash.xlsx"'
+        error: 'Invalid filename format. Expected: "market_id-YYYY-MM-DD-time-type-hash.xlsx" or "market_id-MonthName-YYYY-type-hash.xlsx"'
       };
     } else {
       // Legacy format parsing
@@ -396,6 +440,7 @@ class ExcelParser {
           type: parts[2].toLowerCase(), // 'services' or 'operations'
           date: dateMatch ? new Date(dateMatch[0]) : new Date(),
           format: 'legacy',
+          isEndOfMonth: false,
           isValid: true
         };
       }

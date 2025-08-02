@@ -116,6 +116,14 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
   const mapServicesToScorecard = (apiServices: Record<string, number>) => {
     console.log('🔍 FRONTEND DEBUG: Mapping API services to template field keys:', apiServices);
     
+    // Debug: List all service keys received from API
+    const allKeys = Object.keys(apiServices);
+    console.log('📋 ALL SERVICE KEYS FROM API:', allKeys);
+    
+    // Debug: Show values for potential alignments fields
+    const debugPotential = allKeys.filter(k => k.toLowerCase().includes('potential') || k.toLowerCase().includes('alignment'));
+    console.log('🎯 ALIGNMENT-RELATED FIELDS:', debugPotential.map(k => `${k}: ${apiServices[k]}`));
+    
     // Map API service names to template field keys (lowercase, as used in the template)
     const serviceMapping = {
       // Core KPIs - DON'T set these here, they come from metrics!
@@ -135,9 +143,30 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
       alltires: apiServices['All Tires'] || 0,
       retailtires: apiServices['Retail Tires'] || 0,
       tireprotection: apiServices['Tire Protection'] || 0,
+      tireprotectionPercent: apiServices['Tire Protection %'] || 
+                            apiServices['tireProtectionPercent'] || 
+                            apiServices['TireProtectionPercent'] || 0,
+      'tireprotection%': apiServices['Tire Protection %'] || 
+                        apiServices['tireProtectionPercent'] || 
+                        apiServices['TireProtectionPercent'] || 0,
       tirebalance: apiServices['Tire Balance'] || 0,
       tirerotation: apiServices['Tire Rotation'] || 0,
       alignments: apiServices['Alignments'] || 0,
+      
+      // Potential Alignments fields - check multiple possible key formats
+      potentialalignments: apiServices['Potential Alignments'] || 
+                          apiServices['potentialAlignments'] || 
+                          apiServices['PotentialAlignments'] || 0,
+      potentialalignmentssold: apiServices['Potential Alignments Sold'] || 
+                              apiServices['potentialAlignmentsSold'] || 
+                              apiServices['PotentialAlignmentsSold'] || 0,
+      potentialalignmentsPercent: apiServices['Potential Alignments %'] || 
+                                 apiServices['potentialAlignmentsPercent'] || 
+                                 apiServices['PotentialAlignmentsPercent'] || 0,
+      'potentialalignments%': apiServices['Potential Alignments %'] || 
+                             apiServices['potentialAlignmentsPercent'] || 
+                             apiServices['PotentialAlignmentsPercent'] || 0,
+      
       tpms: apiServices['TPMS'] || 0,
       nitrogen: apiServices['Nitrogen'] || 0,
       
@@ -179,7 +208,13 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
       
       // Brake Service
       brakeservice: apiServices['Brake Service'] || 0,
-      brakeflush: apiServices['Brake Flush'] || 0
+      brakeflush: apiServices['Brake Flush'] || 0,
+      brakeflushtoservicePercent: apiServices['Brake Flush to Service %'] || 
+                                  apiServices['brakeFlushToServicePercent'] || 
+                                  apiServices['BrakeFlushToServicePercent'] || 0,
+      'brakeflushtoservice%': apiServices['Brake Flush to Service %'] || 
+                             apiServices['brakeFlushToServicePercent'] || 
+                             apiServices['BrakeFlushToServicePercent'] || 0
     };
     
     console.log('🔍 FRONTEND DEBUG: Mapped services to template keys:', serviceMapping);
@@ -299,6 +334,10 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
           // Parse MTD month to year and month
           const [mtdYear, mtdMonth] = selectedMtdMonth.split('-');
           
+          // Add timestamp to help identify this specific request
+          const requestTime = new Date().toISOString();
+          console.log(`🚀 FETCHING scorecard for ${user.first_name} at ${requestTime}`);
+          
           const scorecardResponse = await fetch(
             `${process.env.REACT_APP_API_URL}/api/scorecard/advisor/${user.user_id}?mtdYear=${mtdYear}&mtdMonth=${mtdMonth}`,
             {
@@ -322,6 +361,17 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
               rawMetrics: scorecardData.metrics
             });
             
+            // Simple debug to check if services exist
+            console.log(`✅ Services object exists: ${scorecardData.services ? 'YES' : 'NO'}`);
+            if (scorecardData.services) {
+              // Try to get just potential alignments values
+              console.log(`🎯 Checking specific fields:`);
+              console.log(`  - Potential Alignments: ${scorecardData.services['Potential Alignments'] || 'NOT FOUND'}`);
+              console.log(`  - potentialAlignments: ${scorecardData.services['potentialAlignments'] || 'NOT FOUND'}`);
+              console.log(`  - Potential Alignments Sold: ${scorecardData.services['Potential Alignments Sold'] || 'NOT FOUND'}`);
+              console.log(`  - potentialAlignmentsSold: ${scorecardData.services['potentialAlignmentsSold'] || 'NOT FOUND'}`);
+            }
+            
             // Extract store and market info from user assignments
             const stores = user.store_assignments?.map(s => s.store_name).join(', ') || 'Pending Assignment';
             const markets = user.market_assignments?.map(m => m.market_name).join(', ') || 
@@ -336,7 +386,30 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
             const advisorGoals = await fetchAdvisorGoals(user.user_id);
             
             // Map API services to frontend fields using helper function
+            console.log(`🔍 FRONTEND DEBUG: Raw services from API for ${user.first_name}:`, scorecardData.services);
+            
+            // Create a simple debug output that won't get truncated
+            const serviceKeys = Object.keys(scorecardData.services || {});
+            console.log(`📊 SERVICE COUNT: ${serviceKeys.length} services returned from API`);
+            
+            // Debug: Show potential alignments specifically
+            const potentialKeys = Object.keys(scorecardData.services || {}).filter(key => 
+              key.toLowerCase().includes('potential')
+            );
+            console.log(`🎯 POTENTIAL ALIGNMENTS: Found keys containing 'potential':`, potentialKeys);
+            potentialKeys.forEach(key => {
+              console.log(`  - ${key}: ${scorecardData.services[key]}`);
+            });
+            
             const mappedServices = mapServicesToScorecard(scorecardData.services || {});
+            console.log(`🔍 FRONTEND DEBUG: Mapped services for ${user.first_name}:`, mappedServices);
+            
+            // Debug: Show mapped potential alignments
+            console.log(`🎯 MAPPED POTENTIAL ALIGNMENTS:`, {
+              potentialalignments: mappedServices.potentialalignments,
+              potentialalignmentssold: mappedServices.potentialalignmentssold,
+              potentialalignmentsPercent: mappedServices.potentialalignmentsPercent
+            });
             
             // Also map metrics to template field keys
             const salesPerVehicle = scorecardData.metrics?.invoices > 0 

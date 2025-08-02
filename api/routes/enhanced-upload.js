@@ -57,11 +57,19 @@ router.post('/upload/services/discover', upload.single('file'), async (req, res)
       });
     }
     
-    // Use parsed date from filename minus 1 day (MTD through prior day)
-    const mtdDate = new Date(fileInfo.date);
-    mtdDate.setDate(mtdDate.getDate() - 1);
-    const reportDate = mtdDate.toISOString().split('T')[0]; // YYYY-MM-DD
-    console.log('📅 File date:', fileInfo.date.toISOString().split('T')[0], '→ MTD date:', reportDate, 'for file:', req.file.originalname);
+    // Handle date differently for end-of-month vs daily files
+    let reportDate;
+    if (fileInfo.isEndOfMonth) {
+      // For end-of-month files, use the date as-is (last day of month)
+      reportDate = fileInfo.date.toISOString().split('T')[0]; // YYYY-MM-DD
+      console.log('📅 End-of-month file:', fileInfo.monthName, fileInfo.date.getFullYear(), '→ Report date:', reportDate, 'for file:', req.file.originalname);
+    } else {
+      // For daily files, use parsed date minus 1 day (MTD through prior day)
+      const mtdDate = new Date(fileInfo.date);
+      mtdDate.setDate(mtdDate.getDate() - 1);
+      reportDate = mtdDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      console.log('📅 Daily file date:', fileInfo.date.toISOString().split('T')[0], '→ MTD date:', reportDate, 'for file:', req.file.originalname);
+    }
 
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: 'User authentication required' });
@@ -363,11 +371,19 @@ router.post('/upload/operations/discover', upload.single('file'), async (req, re
       });
     }
     
-    // Use parsed date from filename minus 1 day (MTD through prior day)
-    const mtdDate = new Date(fileInfo.date);
-    mtdDate.setDate(mtdDate.getDate() - 1);
-    const reportDate = mtdDate.toISOString().split('T')[0]; // YYYY-MM-DD
-    console.log('📅 File date:', fileInfo.date.toISOString().split('T')[0], '→ MTD date:', reportDate, 'for operations file:', req.file.originalname);
+    // Handle date differently for end-of-month vs daily files
+    let reportDate;
+    if (fileInfo.isEndOfMonth) {
+      // For end-of-month files, use the date as-is (last day of month)
+      reportDate = fileInfo.date.toISOString().split('T')[0]; // YYYY-MM-DD
+      console.log('📅 End-of-month operations file:', fileInfo.monthName, fileInfo.date.getFullYear(), '→ Report date:', reportDate, 'for file:', req.file.originalname);
+    } else {
+      // For daily files, use parsed date minus 1 day (MTD through prior day)
+      const mtdDate = new Date(fileInfo.date);
+      mtdDate.setDate(mtdDate.getDate() - 1);
+      reportDate = mtdDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      console.log('📅 Daily operations file date:', fileInfo.date.toISOString().split('T')[0], '→ MTD date:', reportDate, 'for file:', req.file.originalname);
+    }
 
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: 'User authentication required' });

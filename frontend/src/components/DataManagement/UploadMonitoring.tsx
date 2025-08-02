@@ -81,57 +81,8 @@ const UploadMonitoring: React.FC = () => {
         const data = await response.json();
         setMonitoringData(data);
       } else {
-        // Mock data for development
-        setMonitoringData({
-          uploadStats: {
-            total: 45,
-            successful: 42,
-            failed: 2,
-            pending: 1,
-            successRate: 93.3
-          },
-          recentActivity: [
-            { date: '2024-01-15', uploads: 5, success: 5, failed: 0 },
-            { date: '2024-01-14', uploads: 3, success: 2, failed: 1 },
-            { date: '2024-01-13', uploads: 7, success: 7, failed: 0 },
-            { date: '2024-01-12', uploads: 4, success: 4, failed: 0 },
-            { date: '2024-01-11', uploads: 6, success: 5, failed: 1 },
-            { date: '2024-01-10', uploads: 2, success: 2, failed: 0 },
-            { date: '2024-01-09', uploads: 8, success: 8, failed: 0 }
-          ],
-          fileTypeBreakdown: {
-            services: 28,
-            operations: 17
-          },
-          processingTimes: {
-            average: 3.2,
-            fastest: 1.1,
-            slowest: 8.7
-          },
-          errorCategories: [
-            {
-              category: 'Invalid filename format',
-              count: 5,
-              examples: ['invalid-name.xlsx', 'data.xlsx']
-            },
-            {
-              category: 'Missing advisor mappings',
-              count: 3,
-              examples: ['John Doe', 'Jane Smith', 'Mike Johnson']
-            },
-            {
-              category: 'Data parsing errors',
-              count: 2,
-              examples: ['Empty spreadsheet', 'Invalid date format']
-            }
-          ],
-          advisorMappingStats: {
-            totalMappings: 156,
-            autoMapped: 142,
-            manualMapped: 14,
-            unmappedDiscovered: 8
-          }
-        });
+        console.error('Failed to load monitoring data:', response.status);
+        setMonitoringData(null);
       }
     } catch (error) {
       console.error('Error loading monitoring data:', error);

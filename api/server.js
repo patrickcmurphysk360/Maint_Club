@@ -27,6 +27,7 @@ const servicesManagementRoutes = require('./routes/services-management');
 const marketsRoutes = require('./routes/markets');
 const storesRoutes = require('./routes/stores');
 const dataManagementRoutes = require('./routes/data-management');
+const dataAuditRoutes = require('./routes/data-audit');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -110,6 +111,7 @@ app.use('/api/services-management', authenticateToken, servicesManagementRoutes)
 app.use('/api/markets', authenticateToken, marketsRoutes);
 app.use('/api/stores', authenticateToken, storesRoutes);
 app.use('/api/data-management', authenticateToken, dataManagementRoutes);
+app.use('/api/data-audit', authenticateToken, dataAuditRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

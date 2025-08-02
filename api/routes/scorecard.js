@@ -128,19 +128,39 @@ router.get('/advisor/:userId', async (req, res) => {
       metrics.sales += parseFloat(data.sales || 0);
       metrics.gpSales += parseFloat(data.gpSales || 0);
       
-      // Aggregate all numeric fields from main data
+      // Aggregate all numeric fields from main data (skip percentages - we'll recalculate those)
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'number' && key !== 'invoices' && key !== 'sales' && key !== 'gpSales') {
+          // Skip percentage fields - we'll recalculate them from the aggregated counts
+          if (key.toLowerCase().includes('percent') || key.endsWith('%')) {
+            console.log(`⏭️ Skipping percentage field ${key} during aggregation - will recalculate from totals`);
+            return;
+          }
+          
           aggregatedData[key] = (aggregatedData[key] || 0) + data[key];
+          // Debug potential alignments fields
+          if (key.toLowerCase().includes('potential')) {
+            console.log(`🎯 Aggregating ${key}: ${data[key]} -> total: ${aggregatedData[key]}`);
+          }
         }
       });
       
-      // Aggregate otherServices nested data
+      // Aggregate otherServices nested data (skip percentages - we'll recalculate those)
       if (data.otherServices) {
         Object.keys(data.otherServices).forEach(key => {
           const value = parseFloat(data.otherServices[key]);
           if (!isNaN(value)) {
+            // Skip percentage fields in otherServices too - we'll recalculate them
+            if (key.toLowerCase().includes('%') || key.toLowerCase().includes('percent')) {
+              console.log(`⏭️ Skipping percentage field ${key} in otherServices during aggregation - will recalculate from totals`);
+              return;
+            }
+            
             aggregatedOtherServices[key] = (aggregatedOtherServices[key] || 0) + value;
+            // Debug potential alignments in otherServices
+            if (key.toLowerCase().includes('potential')) {
+              console.log(`🎯 Found in otherServices - ${key}: ${value} -> total: ${aggregatedOtherServices[key]}`);
+            }
           }
         });
       }
@@ -148,8 +168,65 @@ router.get('/advisor/:userId', async (req, res) => {
     
     console.log(`📊 User ${userId} totals: ${metrics.invoices} invoices, $${metrics.sales} sales, ${Object.keys(aggregatedData).length + Object.keys(aggregatedOtherServices).length} service types`);
     
-    // Calculate GP%
+    // Debug: Show all keys that contain "potential" in aggregatedData
+    const potentialKeys = Object.keys(aggregatedData).filter(key => key.toLowerCase().includes('potential'));
+    if (potentialKeys.length > 0) {
+      console.log(`🎯 Found potential alignment keys in aggregatedData:`, potentialKeys.map(k => `${k}: ${aggregatedData[k]}`));
+    } else {
+      console.log(`❌ No potential alignment keys found in aggregatedData`);
+    }
+    
+    // Debug: Show all keys in aggregatedData for inspection
+    console.log(`📊 All aggregatedData keys:`, Object.keys(aggregatedData));
+    
+    // Check if the data has the camelCase versions
+    console.log(`🔍 Checking camelCase fields:
+      - potentialAlignments: ${aggregatedData.potentialAlignments || 'NOT FOUND'}
+      - potentialAlignmentsSold: ${aggregatedData.potentialAlignmentsSold || 'NOT FOUND'}
+      - potentialAlignmentsPercent: ${aggregatedData.potentialAlignmentsPercent || 'NOT FOUND'}`);
+    
+    // Calculate GP% and recalculate other percentages from aggregated totals
     metrics.gpPercent = metrics.sales > 0 ? (metrics.gpSales / metrics.sales) * 100 : 0;
+    
+    // Recalculate percentage fields from aggregated counts (don't sum percentages!)
+    
+    // Potential Alignments % - check both locations for the counts
+    const potentialAlignments = aggregatedData.potentialAlignments || aggregatedOtherServices['Potential Alignments'] || 0;
+    const potentialAlignmentsSold = aggregatedData.potentialAlignmentsSold || aggregatedOtherServices['Potential Alignments Sold'] || 0;
+    
+    if (potentialAlignments > 0) {
+      const potentialAlignmentsPercent = Math.ceil((potentialAlignmentsSold / potentialAlignments) * 100);
+      
+      // Store recalculated percentage in both places to ensure it's found
+      aggregatedData.potentialAlignmentsPercent = potentialAlignmentsPercent;
+      aggregatedOtherServices['Potential Alignments %'] = potentialAlignmentsPercent;
+      
+      console.log(`📊 Recalculated Potential Alignments %: ${potentialAlignmentsSold} / ${potentialAlignments} = ${potentialAlignmentsPercent}% (rounded up)`);
+    }
+    
+    // Tire Protection %
+    const retailTires = aggregatedData.retailTires || aggregatedOtherServices['Retail Tires'] || 0;
+    const tireProtection = aggregatedData.tireProtection || aggregatedOtherServices['Tire Protection'] || 0;
+    
+    if (retailTires > 0) {
+      const tireProtectionPercent = Math.ceil((tireProtection / retailTires) * 100);
+      aggregatedData.tireProtectionPercent = tireProtectionPercent;
+      aggregatedOtherServices['Tire Protection %'] = tireProtectionPercent;
+      
+      console.log(`📊 Recalculated Tire Protection %: ${tireProtection} / ${retailTires} = ${tireProtectionPercent}% (rounded up)`);
+    }
+    
+    // Brake Flush to Service %
+    const brakeService = aggregatedData.brakeService || aggregatedOtherServices['Brake Service'] || 0;
+    const brakeFlush = aggregatedData.brakeFlush || aggregatedOtherServices['Brake Flush'] || 0;
+    
+    if (brakeService > 0) {
+      const brakeFlushToServicePercent = Math.ceil((brakeFlush / brakeService) * 100);
+      aggregatedData.brakeFlushToServicePercent = brakeFlushToServicePercent;
+      aggregatedOtherServices['Brake Flush to Service %'] = brakeFlushToServicePercent;
+      
+      console.log(`📊 Recalculated Brake Flush to Service %: ${brakeFlush} / ${brakeService} = ${brakeFlushToServicePercent}% (rounded up)`);
+    }
     
     // Create smart field mapping that handles template field keys
     const mappedServices = {};
@@ -194,14 +271,14 @@ router.get('/advisor/:userId', async (req, res) => {
       'transfercaseservice': { type: 'nested', field: 'Transfer Case Service', label: 'Transfer Case Service' },
       'headlightrestorationservice': { type: 'nested', field: 'Headlight Restoration Service', label: 'Headlight Restoration Service' },
       
-      // Percentage fields
+      // Percentage fields - these are recalculated from aggregated counts
       'tireprotection%': { type: 'direct', field: 'tireProtectionPercent', label: 'Tire Protection %' },
       'potentialalignments%': { type: 'direct', field: 'potentialAlignmentsPercent', label: 'Potential Alignments %' },
       'brakeflushtoservice%': { type: 'direct', field: 'brakeFlushToServicePercent', label: 'Brake Flush to Service %' },
       
-      // Alignment fields
-      'potentialalignments': { type: 'direct', field: 'potentialAlignments', label: 'Potential Alignments' },
-      'potentialalignmentssold': { type: 'direct', field: 'potentialAlignmentsSold', label: 'Potential Alignments Sold' },
+      // Alignment fields - check both direct and nested
+      'potentialalignments': { type: 'nested', field: 'Potential Alignments', label: 'Potential Alignments' },
+      'potentialalignmentssold': { type: 'nested', field: 'Potential Alignments Sold', label: 'Potential Alignments Sold' },
       'premiumalignments': { type: 'nested', field: 'Premium Alignments', label: 'Premium Alignments' },
       
       // Oil change variants
@@ -225,8 +302,17 @@ router.get('/advisor/:userId', async (req, res) => {
       
       if (mapping.type === 'direct') {
         value = aggregatedData[mapping.field] || 0;
+        // Debug potential alignments mapping
+        if (templateKey.includes('potential')) {
+          console.log(`🎯 Mapping ${templateKey} (${mapping.field}): ${value} from aggregatedData`);
+        }
       } else if (mapping.type === 'nested') {
         value = aggregatedOtherServices[mapping.field] || 0;
+        // Debug potential alignments in nested
+        if (templateKey.includes('potential')) {
+          console.log(`🎯 Mapping ${templateKey} (${mapping.field}): ${value} from aggregatedOtherServices`);
+          console.log(`   Available in otherServices:`, Object.keys(aggregatedOtherServices).filter(k => k.toLowerCase().includes('potential')));
+        }
       } else if (mapping.type === 'calculated') {
         // Handle calculated fields from metrics
         if (mapping.field === 'invoices') {
@@ -285,7 +371,19 @@ router.get('/advisor/:userId', async (req, res) => {
       
       // Include ALL services in response, even zeros - frontend template decides what to show
       mappedServices[displayName] = value;
+      
+      // Debug: Log potential alignments being added to mappedServices
+      if (displayName.toLowerCase().includes('potential alignment')) {
+        console.log(`✅ Adding to final services: "${displayName}" = ${value}`);
+      }
     });
+    
+    // Final debug: Show all potential alignment fields in the response
+    console.log(`📋 Final mapped services with potential alignments:`, 
+      Object.entries(mappedServices)
+        .filter(([key]) => key.toLowerCase().includes('potential') || key.toLowerCase().includes('alignment'))
+        .map(([key, val]) => `${key}: ${val}`)
+    );
     
     // Get goals for this advisor
     const goalsResult = await pool.query(`
@@ -324,7 +422,7 @@ router.get('/advisor/:userId', async (req, res) => {
         invoices: metrics.invoices,
         sales: metrics.sales,
         gpSales: metrics.gpSales,
-        gpPercent: metrics.gpPercent.toFixed(1)
+        gpPercent: Math.ceil(metrics.gpPercent)
       },
       services: mappedServices,
       goals: goals,

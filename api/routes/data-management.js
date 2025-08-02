@@ -131,10 +131,65 @@ router.get('/monitoring', async (req, res) => {
       GROUP BY file_type
     `;
     
-    const [uploadStats, recentActivity, fileTypes] = await Promise.all([
+    // Get real advisor mapping statistics
+    const advisorMappingStatsQuery = `
+      SELECT 
+        COUNT(*) as total_mappings,
+        COUNT(CASE WHEN created_at >= CURRENT_DATE - INTERVAL '${days} days' THEN 1 END) as recent_mappings,
+        COUNT(CASE WHEN user_id IS NOT NULL THEN 1 END) as manual_mapped,
+        0 as auto_mapped
+      FROM advisor_mappings
+      WHERE is_active = true
+    `;
+    
+    // Get unmapped advisors count
+    const unmappedAdvisorsQuery = `
+      SELECT COUNT(DISTINCT advisor_name) as count
+      FROM (
+        SELECT jsonb_array_elements(discovered_advisors)->>'name' as advisor_name
+        FROM upload_sessions
+        WHERE status = 'pending_review'
+        AND discovered_advisors IS NOT NULL
+      ) as discovered
+      WHERE advisor_name NOT IN (
+        SELECT spreadsheet_name FROM advisor_mappings WHERE is_active = true
+      )
+    `;
+    
+    // Get processing times from actual upload data
+    const processingTimesQuery = `
+      SELECT 
+        AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/60) as avg_minutes,
+        MIN(EXTRACT(EPOCH FROM (updated_at - created_at))/60) as min_minutes,
+        MAX(EXTRACT(EPOCH FROM (updated_at - created_at))/60) as max_minutes
+      FROM file_uploads
+      WHERE status = 'completed'
+      AND upload_date >= CURRENT_DATE - INTERVAL '${days} days'
+      AND updated_at IS NOT NULL
+    `;
+    
+    // Get error categories from failed uploads
+    const errorCategoriesQuery = `
+      SELECT 
+        error_message,
+        COUNT(*) as count
+      FROM file_uploads
+      WHERE status = 'failed'
+      AND upload_date >= CURRENT_DATE - INTERVAL '${days} days'
+      AND error_message IS NOT NULL
+      GROUP BY error_message
+      ORDER BY count DESC
+      LIMIT 5
+    `;
+    
+    const [uploadStats, recentActivity, fileTypes, advisorMappingStats, unmappedAdvisors, processingTimes, errorCategories] = await Promise.all([
       pool.query(uploadStatsQuery),
       pool.query(recentActivityQuery),
-      pool.query(fileTypeQuery)
+      pool.query(fileTypeQuery),
+      pool.query(advisorMappingStatsQuery).catch(() => ({ rows: [{ total_mappings: 0, recent_mappings: 0, manual_mapped: 0, auto_mapped: 0 }] })),
+      pool.query(unmappedAdvisorsQuery).catch(() => ({ rows: [{ count: 0 }] })),
+      pool.query(processingTimesQuery).catch(() => ({ rows: [{ avg_minutes: 0, min_minutes: 0, max_minutes: 0 }] })),
+      pool.query(errorCategoriesQuery).catch(() => ({ rows: [] }))
     ]);
     
     // Format data
@@ -151,6 +206,20 @@ router.get('/monitoring', async (req, res) => {
       return acc;
     }, { services: 0 });
     
+    // Format advisor mapping statistics
+    const mappingStats = advisorMappingStats.rows[0];
+    const unmappedCount = parseInt(unmappedAdvisors.rows[0].count);
+    
+    // Format processing times
+    const timingStats = processingTimes.rows[0];
+    
+    // Format error categories
+    const errorData = errorCategories.rows.map(row => ({
+      category: row.error_message || 'Unknown Error',
+      count: parseInt(row.count),
+      examples: []
+    }));
+    
     const monitoringData = {
       uploadStats: {
         total: parseInt(stats.total),
@@ -162,27 +231,16 @@ router.get('/monitoring', async (req, res) => {
       recentActivity: activity,
       fileTypeBreakdown,
       processingTimes: {
-        average: 3.2,
-        fastest: 1.1,
-        slowest: 8.7
+        average: parseFloat(timingStats.avg_minutes) || 0,
+        fastest: parseFloat(timingStats.min_minutes) || 0,
+        slowest: parseFloat(timingStats.max_minutes) || 0
       },
-      errorCategories: [
-        {
-          category: 'Invalid filename format',
-          count: 5,
-          examples: ['invalid-name.xlsx', 'data.xlsx']
-        },
-        {
-          category: 'Missing advisor mappings',
-          count: 3,
-          examples: ['John Doe', 'Jane Smith', 'Mike Johnson']
-        }
-      ],
+      errorCategories: errorData,
       advisorMappingStats: {
-        totalMappings: 156,
-        autoMapped: 142,
-        manualMapped: 14,
-        unmappedDiscovered: 8
+        totalMappings: parseInt(mappingStats.total_mappings) || 0,
+        autoMapped: parseInt(mappingStats.auto_mapped) || 0,
+        manualMapped: parseInt(mappingStats.manual_mapped) || 0,
+        unmappedDiscovered: unmappedCount
       }
     };
     
@@ -297,23 +355,79 @@ router.get('/health-check', async (req, res) => {
     
     const overallStatus = hasFailures ? 'critical' : hasWarnings ? 'warning' : 'healthy';
     
+    // Get real issues from database
+    const issues = [];
+    
+    try {
+      // Check for recent failed uploads
+      const failedUploadsResult = await pool.query(`
+        SELECT 
+          error_message,
+          COUNT(*) as count,
+          MAX(upload_date) as last_occurred,
+          array_agg(filename ORDER BY upload_date DESC LIMIT 3) as examples
+        FROM file_uploads
+        WHERE status = 'failed'
+        AND upload_date >= CURRENT_DATE - INTERVAL '7 days'
+        AND error_message IS NOT NULL
+        GROUP BY error_message
+        ORDER BY count DESC
+        LIMIT 5
+      `);
+      
+      failedUploadsResult.rows.forEach((row, index) => {
+        issues.push({
+          id: `failed_${index + 1}`,
+          type: 'error',
+          category: 'upload_errors',
+          title: 'Recent Upload Failures',
+          description: `${row.count} uploads failed with error: ${row.error_message}`,
+          solution: 'Review upload files and correct the identified issues',
+          autoFixable: false,
+          count: parseInt(row.count),
+          examples: row.examples || [],
+          lastOccurred: row.last_occurred
+        });
+      });
+      
+      // Check for unmapped advisors
+      const unmappedAdvisorsResult = await pool.query(`
+        SELECT COUNT(DISTINCT advisor_name) as count
+        FROM (
+          SELECT jsonb_array_elements(discovered_advisors)->>'name' as advisor_name
+          FROM upload_sessions
+          WHERE status = 'pending_review'
+          AND discovered_advisors IS NOT NULL
+        ) as discovered
+        WHERE advisor_name NOT IN (
+          SELECT spreadsheet_name FROM advisor_mappings WHERE is_active = true
+        )
+      `).catch(() => ({ rows: [{ count: 0 }] }));
+      
+      const unmappedCount = parseInt(unmappedAdvisorsResult.rows[0].count);
+      if (unmappedCount > 0) {
+        issues.push({
+          id: 'unmapped_advisors',
+          type: 'warning',
+          category: 'advisor_mapping',
+          title: 'Unmapped Advisors Detected',
+          description: `${unmappedCount} advisor names found in uploads without user mappings`,
+          solution: 'Create advisor mappings for these names in the Data Mappings section',
+          autoFixable: true,
+          count: unmappedCount,
+          examples: [],
+          lastOccurred: new Date().toISOString()
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error detecting issues:', error);
+    }
+    
     const healthData = {
       overallStatus,
       systemChecks: checks,
-      issues: [
-        {
-          id: '1',
-          type: 'error',
-          category: 'file_format',
-          title: 'Invalid Filename Formats',
-          description: '5 recent uploads failed due to incorrect filename format',
-          solution: 'Ensure filenames follow the pattern: "marketId-YYYY-MM-DD-time-Type-hash.xlsx"',
-          autoFixable: false,
-          count: 5,
-          examples: ['data.xlsx', 'services-file.xlsx', 'invalid-name.xlsx'],
-          lastOccurred: new Date().toISOString()
-        }
-      ],
+      issues,
       recommendations: [
         'Standardize filename formats across all uploads',
         'Create advisor mappings proactively before bulk uploads',

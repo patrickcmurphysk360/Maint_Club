@@ -19,10 +19,12 @@ interface FileInfo {
   date: string;
   time: string;
   type: 'services';
-  format: 'new' | 'legacy';
+  format: 'new' | 'legacy' | 'end-of-month';
   hash?: string;
   isValid: boolean;
   error?: string;
+  isEndOfMonth?: boolean;
+  monthName?: string;
 }
 
 interface UnifiedUploaderProps {
@@ -44,37 +46,83 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
   // Parse filename to extract metadata
   const parseFilename = (filename: string): FileInfo => {
     // New format: "market_id-YYYY-MM-DD-time-Services-hash.xlsx"
+    // End-of-month format: "market_id-MonthName-YYYY-Services-hash.xlsx"
     // More flexible parsing to match backend
     const base = filename.replace(/\.xlsx?$/i, '');
     const tokens = base.split('-');
     
-    // Check if it's the new format (starts with numeric market_id and has at least 6 segments)
-    if (/^\d+-.+/.test(base) && tokens.length >= 6) {
+    // Month names mapping
+    const monthNames: { [key: string]: number } = {
+      'january': 0, 'february': 1, 'march': 2, 'april': 3,
+      'may': 4, 'june': 5, 'july': 6, 'august': 7,
+      'september': 8, 'october': 9, 'november': 10, 'december': 11
+    };
+    
+    // Check if it's the new format (starts with numeric market_id)
+    if (/^\d+-.+/.test(base)) {
       const marketId = tokens[0];
-      const year = tokens[1];
-      const month = tokens[2];
-      const day = tokens[3];
-      const time = tokens[4];
-      const type = tokens[5];
-      const hash = tokens.length > 6 ? tokens.slice(6).join('-') : '';
       
-      // Validate date components
-      if (year.length === 4 && month.length === 2 && day.length === 2) {
-        const dateStr = `${year}-${month}-${day}`;
-        const dateObj = new Date(dateStr);
+      // Check for end-of-month format: market_id-MonthName-YYYY-Services-hash
+      if (tokens.length >= 4) {
+        const potentialMonth = tokens[1].toLowerCase();
         
-        // Validate the date is valid and type is Services
-        if (!isNaN(dateObj.getTime()) && type.toLowerCase() === 'services') {
-          return {
-            marketId: parseInt(marketId),
-            market: `Market ${marketId}`,
-            date: dateStr,
-            time,
-            type: 'services',
-            format: 'new',
-            hash,
-            isValid: true
-          };
+        // Check if second token is a month name
+        if (monthNames.hasOwnProperty(potentialMonth)) {
+          const monthIndex = monthNames[potentialMonth];
+          const year = tokens[2];
+          const type = tokens[3];
+          const hash = tokens.length > 4 ? tokens.slice(4).join('-') : '';
+          
+          // Validate year and type
+          if (year.length === 4 && !isNaN(parseInt(year)) && type.toLowerCase() === 'services') {
+            // Calculate last day of the month
+            const lastDayOfMonth = new Date(parseInt(year), monthIndex + 1, 0);
+            const dateStr = lastDayOfMonth.toISOString().split('T')[0];
+            
+            return {
+              marketId: parseInt(marketId),
+              market: `Market ${marketId}`,
+              date: dateStr,
+              time: 'end-of-month',
+              type: 'services',
+              format: 'end-of-month',
+              hash,
+              isValid: true,
+              isEndOfMonth: true,
+              monthName: tokens[1]
+            };
+          }
+        }
+      }
+      
+      // Check for daily format (original new format)
+      if (tokens.length >= 6) {
+        const year = tokens[1];
+        const month = tokens[2];
+        const day = tokens[3];
+        const time = tokens[4];
+        const type = tokens[5];
+        const hash = tokens.length > 6 ? tokens.slice(6).join('-') : '';
+        
+        // Validate date components
+        if (year.length === 4 && month.length === 2 && day.length === 2) {
+          const dateStr = `${year}-${month}-${day}`;
+          const dateObj = new Date(dateStr);
+          
+          // Validate the date is valid and type is Services
+          if (!isNaN(dateObj.getTime()) && type.toLowerCase() === 'services') {
+            return {
+              marketId: parseInt(marketId),
+              market: `Market ${marketId}`,
+              date: dateStr,
+              time,
+              type: 'services',
+              format: 'new',
+              hash,
+              isValid: true,
+              isEndOfMonth: false
+            };
+          }
         }
       }
     }
@@ -91,7 +139,8 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
         time: '0000',
         type: 'services',
         format: 'legacy',
-        isValid: true
+        isValid: true,
+        isEndOfMonth: false
       };
     }
 
@@ -229,16 +278,26 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
           </div>
           <div>
             <span className="font-medium text-gray-700">Date:</span>
-            <span className="ml-2 text-gray-900">{fileInfo.date || 'Not detected'}</span>
+            <span className="ml-2 text-gray-900">
+              {fileInfo.isEndOfMonth 
+                ? `${fileInfo.monthName} ${new Date(fileInfo.date).getFullYear()} (End of Month)`
+                : (fileInfo.date || 'Not detected')}
+            </span>
           </div>
           <div>
             <span className="font-medium text-gray-700">Format:</span>
             <span className={`ml-2 px-2 py-1 rounded text-xs font-medium ${
-              fileInfo.format === 'new' 
+              fileInfo.format === 'end-of-month' 
+                ? 'bg-purple-100 text-purple-800'
+                : fileInfo.format === 'new' 
                 ? 'bg-green-100 text-green-800' 
                 : 'bg-yellow-100 text-yellow-800'
             }`}>
-              {fileInfo.format}
+              {fileInfo.format === 'end-of-month' 
+                ? 'End-of-Month Format' 
+                : fileInfo.format === 'new' 
+                ? 'Daily Format' 
+                : 'Legacy Format'}
             </span>
           </div>
         </div>
@@ -251,7 +310,8 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
               <p className="text-red-700 text-sm mt-1">{fileInfo.error}</p>
               <div className="mt-2 text-xs text-red-600">
                 <p><strong>Expected Services formats:</strong></p>
-                <p>• New: "123-2024-01-15-1200-Services-abc123.xlsx"</p>
+                <p>• Daily: "123-2024-01-15-1200-Services-abc123.xlsx"</p>
+                <p>• End-of-Month: "123-July-2024-Services-abc123.xlsx"</p>
                 <p>• Legacy: "Market Name - System - Services - 2024-01-15.xlsx"</p>
               </div>
             </div>

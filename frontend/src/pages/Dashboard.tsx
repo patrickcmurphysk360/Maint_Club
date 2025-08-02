@@ -163,31 +163,38 @@ const Dashboard: React.FC = () => {
               <div className="flex items-start">
                 <InformationCircleIcon className="h-5 w-5 text-blue-600 mr-2 flex-shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="font-medium text-blue-800">Data Management Available</h4>
+                  <h4 className="font-medium text-blue-800">File Uploads</h4>
                   <p className="text-blue-700 text-sm mt-1">
-                    Use the new <strong>Data Management</strong> section in Admin Tools for enhanced upload capabilities with auto-detection, mapping management, and troubleshooting.
+                    Use the <strong>Data Management</strong> section in Admin Tools for all file uploads with enhanced features including auto-detection, mapping management, and troubleshooting.
                   </p>
                 </div>
               </div>
             </div>
             
             <div className="card">
-              <h3 className="text-lg font-semibold mb-4">📊 Upload Services Data (MTD)</h3>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) {
-                    handleFileUpload(e.target.files[0], 'services');
-                  }
-                }}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                <strong>New format:</strong> "market_id-YYYY-MM-DD-time-Services-hash.xlsx"<br />
-                <strong>Legacy:</strong> "Market - System - Services - YYYY-MM-DD.xlsx"<br />
-                <strong>Content:</strong> Month-to-Date advisor performance rollups
-              </p>
+              <h3 className="text-lg font-semibold mb-4">📊 System Overview</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="font-medium text-gray-900 mb-2">📈 Performance Data</h4>
+                  <p className="text-sm text-gray-600">
+                    Advisor scorecards and KPI tracking system for MTD performance monitoring.
+                  </p>
+                </div>
+                
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="font-medium text-gray-900 mb-2">🏷️ Vendor Integration</h4>
+                  <p className="text-sm text-gray-600">
+                    Service-to-product mapping with branded scorecard displays.
+                  </p>
+                </div>
+                
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h4 className="font-medium text-gray-900 mb-2">💬 Coaching Tools</h4>
+                  <p className="text-sm text-gray-600">
+                    Manager-to-advisor communication and goal tracking system.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         );
