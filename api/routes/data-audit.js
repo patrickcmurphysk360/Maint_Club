@@ -8,7 +8,7 @@ router.get('/summary', async (req, res) => {
     
     console.log('🔍 Getting data audit summary...');
     
-    // Get recent uploaded files with details
+    // Get recent uploaded files with details - extract market from filename if not in market_id
     const recentFilesResult = await pool.query(`
       SELECT 
         fu.id::text,
@@ -16,15 +16,20 @@ router.get('/summary', async (req, res) => {
         fu.upload_date,
         fu.status,
         fu.market_id,
-        m.name as market_name,
+        COALESCE(m.name, m2.name) as market_name,
         COUNT(DISTINCT pd.advisor_user_id) as advisor_count
       FROM file_uploads fu
       LEFT JOIN markets m ON fu.market_id::text = m.id::text
+      LEFT JOIN markets m2 ON CASE 
+        WHEN fu.filename ~ '^[0-9]+-' 
+        THEN split_part(fu.filename, '-', 1)::text = m2.id::text 
+        ELSE false 
+      END
       LEFT JOIN performance_data pd ON pd.upload_date::date = fu.upload_date::date 
         AND pd.data_type = 'services'
       WHERE fu.upload_date >= CURRENT_DATE - INTERVAL '30 days'
         AND fu.file_type = 'services'
-      GROUP BY fu.id, fu.filename, fu.upload_date, fu.status, fu.market_id, m.name
+      GROUP BY fu.id, fu.filename, fu.upload_date, fu.status, fu.market_id, m.name, m2.name
       ORDER BY fu.upload_date DESC
       LIMIT 10
     `);
@@ -128,10 +133,42 @@ router.get('/details/:fileId', async (req, res) => {
         lastUpdate: row.last_update || uploadDate
       };
       
-      // Get current scorecard data for comparison
+      // Get current scorecard data for comparison - using built-in http module for container environment
       try {
-        const scorecardResponse = await fetch(`http://localhost:5000/api/scorecard/advisor/${advisor.advisorId}?mtdMonth=${new Date(uploadDate).getMonth() + 1}&mtdYear=${new Date(uploadDate).getFullYear()}`, {
-          headers: { 'Authorization': req.headers.authorization }
+        const http = require('http');
+        const url = require('url');
+        
+        const scorecardUrl = `http://127.0.0.1:5000/api/scorecard/advisor/${advisor.advisorId}?mtdMonth=${new Date(uploadDate).getMonth() + 1}&mtdYear=${new Date(uploadDate).getFullYear()}`;
+        console.log(`🔗 Fetching scorecard data from: ${scorecardUrl}`);
+        
+        const scorecardResponse = await new Promise((resolve, reject) => {
+          const parsedUrl = url.parse(scorecardUrl);
+          const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port,
+            path: parsedUrl.path,
+            method: 'GET',
+            headers: {
+              'Authorization': req.headers.authorization,
+              'Content-Type': 'application/json'
+            }
+          };
+          
+          const httpReq = http.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              resolve({
+                ok: res.statusCode >= 200 && res.statusCode < 300,
+                status: res.statusCode,
+                json: () => Promise.resolve(JSON.parse(data))
+              });
+            });
+          });
+          
+          httpReq.on('error', reject);
+          httpReq.setTimeout(10000);
+          httpReq.end();
         });
         
         if (scorecardResponse.ok) {
@@ -158,7 +195,7 @@ router.get('/details/:fileId', async (req, res) => {
           advisor.processedData = {};
         }
       } catch (error) {
-        console.error(`❌ Error getting scorecard for advisor ${advisor.advisorId}:`, error);
+        console.error(`❌ Error getting scorecard for advisor ${advisor.advisorId}:`, error.message);
         advisor.scorecardData = {};
         advisor.processedData = {};
       }

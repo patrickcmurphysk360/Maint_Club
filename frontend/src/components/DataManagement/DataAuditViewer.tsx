@@ -540,7 +540,7 @@ const DataAuditViewer: React.FC = () => {
                       {new Date(file.uploadDate).toLocaleDateString()} • {file.advisorCount} advisors
                     </p>
                   </div>
-                  <div className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
+                  <div className={`ml-2 px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${
                     file.status === 'completed' 
                       ? 'bg-green-100 text-green-800'
                       : 'bg-yellow-100 text-yellow-800'

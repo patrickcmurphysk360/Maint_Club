@@ -276,9 +276,9 @@ router.get('/advisor/:userId', async (req, res) => {
       'potentialalignments%': { type: 'direct', field: 'potentialAlignmentsPercent', label: 'Potential Alignments %' },
       'brakeflushtoservice%': { type: 'direct', field: 'brakeFlushToServicePercent', label: 'Brake Flush to Service %' },
       
-      // Alignment fields - check both direct and nested
-      'potentialalignments': { type: 'nested', field: 'Potential Alignments', label: 'Potential Alignments' },
-      'potentialalignmentssold': { type: 'nested', field: 'Potential Alignments Sold', label: 'Potential Alignments Sold' },
+      // Alignment fields - these are in main data, not nested otherServices
+      'potentialalignments': { type: 'direct', field: 'potentialAlignments', label: 'Potential Alignments' },
+      'potentialalignmentssold': { type: 'direct', field: 'potentialAlignmentsSold', label: 'Potential Alignments Sold' },
       'premiumalignments': { type: 'nested', field: 'Premium Alignments', label: 'Premium Alignments' },
       
       // Oil change variants
