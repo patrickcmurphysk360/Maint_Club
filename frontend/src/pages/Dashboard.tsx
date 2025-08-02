@@ -10,6 +10,8 @@ import StoreManagement from '../components/StoreManagement';
 import VendorManagement from '../components/VendorManagement';
 import ServiceManagement from '../components/ServiceManagement';
 import AdvisorScorecards from '../components/Scorecard/AdvisorScorecards';
+import StoreScorecards from '../components/Scorecard/StoreScorecards';
+import CoachingTabs from '../components/Scorecard/CoachingTabs';
 import PersonalScorecard from '../components/Scorecard/PersonalScorecard';
 import ScorecardTemplateManager from '../components/Scorecard/ScorecardTemplateManager';
 import UploadConfirmation from '../components/UploadConfirmation';
@@ -227,7 +229,7 @@ const Dashboard: React.FC = () => {
                 <ThreadedMessaging selectedAdvisor={selectedAdvisorForMessaging} />
               </div>
             ) : (
-              <AdvisorScorecards 
+              <CoachingTabs 
                 onMessageAdvisor={handleMessageAdvisor}
               />
             )}

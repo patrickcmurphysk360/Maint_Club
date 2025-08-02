@@ -697,7 +697,7 @@ router.get('/verification-stats', async (req, res) => {
           SELECT COUNT(*) 
           FROM performance_data 
           WHERE data_type = 'services' 
-          AND (market_id IS NULL OR store_id IS NULL OR advisor_user_id IS NULL)
+          AND (market_id IS NULL OR store_id IS NULL)
         ) as orphaned_performance_records,
         (
           SELECT COUNT(*) - COUNT(DISTINCT spreadsheet_name)
@@ -805,6 +805,93 @@ router.get('/sample-performance-data', async (req, res) => {
   } catch (error) {
     console.error('Error fetching sample performance data:', error);
     res.status(500).json({ error: 'Failed to fetch sample data' });
+  }
+});
+
+// GET /api/data-management/data-breakdown - Get detailed breakdown of data types
+router.get('/data-breakdown', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { role } = req.user;
+    
+    // Check permissions
+    if (!['admin', 'administrator'].includes(role)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    
+    // Get detailed breakdown of performance data
+    const dataBreakdownQuery = `
+      SELECT 
+        data_type,
+        CASE 
+          WHEN advisor_user_id IS NULL THEN 'store_level'
+          ELSE 'advisor_level'
+        END as data_level,
+        COUNT(*) as record_count,
+        COUNT(DISTINCT market_id) as unique_markets,
+        COUNT(DISTINCT store_id) as unique_stores,
+        COUNT(DISTINCT advisor_user_id) as unique_advisors,
+        MIN(upload_date) as earliest_date,
+        MAX(upload_date) as latest_date
+      FROM performance_data
+      WHERE data_type = 'services'
+      GROUP BY data_type, (advisor_user_id IS NULL)
+      ORDER BY data_type, data_level
+    `;
+    
+    // Get recent uploads breakdown
+    const recentUploadsQuery = `
+      SELECT 
+        us.filename,
+        us.status,
+        us.created_at,
+        us.discovered_markets->0->>'name' as market_name,
+        COALESCE(jsonb_array_length(us.discovered_markets), 0) as markets_count,
+        COALESCE(jsonb_array_length(us.discovered_stores), 0) as stores_count,
+        COALESCE(jsonb_array_length(us.discovered_advisors), 0) as advisors_count,
+        us.raw_data->'stores' is not null as has_store_data,
+        us.raw_data->'employees' is not null as has_advisor_data
+      FROM upload_sessions us
+      WHERE us.created_at >= CURRENT_DATE - INTERVAL '7 days'
+      ORDER BY us.created_at DESC
+      LIMIT 10
+    `;
+    
+    const [dataBreakdown, recentUploads] = await Promise.all([
+      pool.query(dataBreakdownQuery),
+      pool.query(recentUploadsQuery)
+    ]);
+    
+    const breakdown = {
+      performanceData: dataBreakdown.rows.map(row => ({
+        dataType: row.data_type,
+        dataLevel: row.data_level,
+        recordCount: parseInt(row.record_count),
+        uniqueMarkets: parseInt(row.unique_markets),
+        uniqueStores: parseInt(row.unique_stores),
+        uniqueAdvisors: parseInt(row.unique_advisors),
+        dateRange: {
+          earliest: row.earliest_date,
+          latest: row.latest_date
+        }
+      })),
+      recentUploads: recentUploads.rows.map(row => ({
+        filename: row.filename,
+        status: row.status,
+        createdAt: row.created_at,
+        marketName: row.market_name,
+        marketsCount: parseInt(row.markets_count) || 0,
+        storesCount: parseInt(row.stores_count) || 0,
+        advisorsCount: parseInt(row.advisors_count) || 0,
+        hasStoreData: row.has_store_data,
+        hasAdvisorData: row.has_advisor_data
+      }))
+    };
+    
+    res.json(breakdown);
+  } catch (error) {
+    console.error('Error fetching data breakdown:', error);
+    res.status(500).json({ error: 'Failed to fetch data breakdown' });
   }
 });
 

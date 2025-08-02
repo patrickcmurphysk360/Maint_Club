@@ -673,6 +673,65 @@ class UploadProcessor {
       }
     }
 
+    // Process store-level data if available in the spreadsheet
+    if (rawData.stores && rawData.stores.length > 0) {
+      console.log(`📊 Processing ${rawData.stores.length} store-level records`);
+      
+      for (const store of rawData.stores) {
+        const marketId = marketMappings[store.market];
+        const storeKey = `${store.market}:${store.storeName}`;
+        const storeId = storeMappings[storeKey];
+        
+        if (!marketId || !storeId) {
+          console.warn(`⚠️ Skipping store ${store.storeName} - missing market or store mapping`);
+          continue;
+        }
+
+        // Store performance data with store_id set (advisor_user_id = NULL for store-level data)
+        await client.query(`
+          INSERT INTO performance_data 
+          (upload_date, data_type, market_id, store_id, advisor_user_id, data)
+          VALUES ($1, 'services', $2, $3, NULL, $4)
+        `, [
+          session.report_date,
+          marketId,
+          storeId,
+          JSON.stringify(store)
+        ]);
+
+        console.log(`🏪 Processed store-level data for ${store.storeName} in market ${store.market}`);
+        processedCount++;
+      }
+    }
+
+    // Process market-level data if available in the spreadsheet
+    if (rawData.markets && rawData.markets.length > 0) {
+      console.log(`📊 Processing ${rawData.markets.length} market-level records`);
+      
+      for (const market of rawData.markets) {
+        const marketId = marketMappings[market.market];
+        
+        if (!marketId) {
+          console.warn(`⚠️ Skipping market ${market.market} - missing market mapping`);
+          continue;
+        }
+
+        // Market performance data with both store_id and advisor_user_id = NULL for market-level data
+        await client.query(`
+          INSERT INTO performance_data 
+          (upload_date, data_type, market_id, store_id, advisor_user_id, data)
+          VALUES ($1, 'services', $2, NULL, NULL, $3)
+        `, [
+          session.report_date,
+          marketId,
+          JSON.stringify(market)
+        ]);
+
+        console.log(`🏬 Processed market-level data for ${market.market}`);
+        processedCount++;
+      }
+    }
+
     return processedCount;
   }
 

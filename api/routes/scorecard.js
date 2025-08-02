@@ -1019,4 +1019,555 @@ router.get('/advisor/:userId/by-store', async (req, res) => {
   }
 });
 
+// Get store scorecards for a market
+router.get('/stores/:marketId', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { marketId } = req.params;
+    const { mtdMonth, mtdYear } = req.query;
+    
+    // Check permissions - advisors cannot view store scorecards
+    if (req.user.role === 'advisor') {
+      return res.status(403).json({ message: 'Forbidden: Advisors cannot view store scorecards' });
+    }
+    
+    console.log(`🏪 Getting store scorecards for market ${marketId}, MTD: ${mtdYear}-${mtdMonth}`);
+    
+    // Parse MTD parameters or use current month
+    let targetYear, targetMonth;
+    if (mtdMonth && mtdYear) {
+      targetYear = parseInt(mtdYear);
+      targetMonth = parseInt(mtdMonth);
+    } else {
+      const now = new Date();
+      targetYear = now.getFullYear();
+      targetMonth = now.getMonth() + 1;
+    }
+    
+    // Get all stores in the market
+    const storesResult = await pool.query(`
+      SELECT id, name, market_id
+      FROM stores 
+      WHERE market_id = $1 
+      ORDER BY name
+    `, [marketId]);
+    
+    if (storesResult.rows.length === 0) {
+      return res.status(404).json({ message: 'No stores found for this market' });
+    }
+    
+    console.log(`🏪 Found ${storesResult.rows.length} stores in market ${marketId}`);
+    
+    // Get vendor mappings for this market
+    const vendorMappingsResult = await pool.query(`
+      SELECT DISTINCT
+        vpm.vendor_id,
+        vpm.service_field,
+        vpm.product_name,
+        vt.name as vendor_name
+      FROM market_tags mt
+      JOIN vendor_product_mappings vpm ON vpm.vendor_id = mt.tag_id
+      JOIN vendor_tags vt ON vt.id = vpm.vendor_id
+      WHERE mt.market_id = $1
+    `, [marketId]);
+    
+    // Build vendor mapping lookup
+    const vendorMappings = {};
+    vendorMappingsResult.rows.forEach(row => {
+      if (!vendorMappings[row.service_field]) {
+        vendorMappings[row.service_field] = {};
+      }
+      vendorMappings[row.service_field][row.vendor_id] = {
+        productName: row.product_name,
+        vendorName: row.vendor_name
+      };
+    });
+    
+    console.log(`📦 Market ${marketId} vendor mappings:`, vendorMappingsResult.rows.map(r => `${r.service_field} -> ${r.product_name}`));
+    
+    // Process each store
+    const storeScoreCards = [];
+    
+    for (const store of storesResult.rows) {
+      console.log(`\n🏪 Processing store: ${store.name} (ID: ${store.id})`);
+      
+      // Get latest store-level performance data for this store for the target month
+      const performanceResult = await pool.query(`
+        SELECT 
+          pd.data
+        FROM performance_data pd
+        WHERE pd.store_id = $1
+          AND pd.data_type = 'services'
+          AND pd.advisor_user_id IS NULL
+          AND EXTRACT(YEAR FROM pd.upload_date) = $2
+          AND EXTRACT(MONTH FROM pd.upload_date) = $3
+        ORDER BY pd.upload_date DESC, pd.id DESC
+        LIMIT 1
+      `, [store.id, targetYear, targetMonth]);
+      
+      if (performanceResult.rows.length === 0) {
+        console.log(`⚠️ No store-level performance data found for store ${store.name} in ${targetYear}-${targetMonth.toString().padStart(2, '0')}`);
+        continue;
+      }
+      
+      console.log(`📊 Found store-level performance data for ${store.name}`);
+      
+      // Use direct store data (no aggregation needed)
+      const storeData = performanceResult.rows[0].data;
+      
+      const storeMetrics = {
+        invoices: parseInt(storeData.invoices || 0),
+        sales: parseFloat(storeData.sales || 0),
+        gpSales: parseFloat(storeData.gpSales || 0),
+        gpPercent: parseFloat(storeData.gpPercent || 0)
+      };
+      
+      // Use the data directly (no aggregation)
+      const aggregatedData = { ...storeData };
+      const aggregatedOtherServices = storeData.otherServices || {};
+      
+      // Recalculate percentage fields from aggregated counts
+      const potentialAlignments = aggregatedData.potentialAlignments || aggregatedOtherServices['Potential Alignments'] || 0;
+      const potentialAlignmentsSold = aggregatedData.potentialAlignmentsSold || aggregatedOtherServices['Potential Alignments Sold'] || 0;
+      
+      if (potentialAlignments > 0) {
+        const potentialAlignmentsPercent = Math.ceil((potentialAlignmentsSold / potentialAlignments) * 100);
+        aggregatedData.potentialAlignmentsPercent = potentialAlignmentsPercent;
+        aggregatedOtherServices['Potential Alignments %'] = potentialAlignmentsPercent;
+      } else {
+        aggregatedData.potentialAlignmentsPercent = 0;
+        aggregatedOtherServices['Potential Alignments %'] = 0;
+      }
+      
+      // Brake flush to service percentage
+      const brakeService = aggregatedData.brakeService || 0;
+      const brakeFlush = aggregatedData.brakeFlush || 0;
+      
+      if (brakeService > 0) {
+        const brakeFlushToServicePercent = Math.ceil((brakeFlush / brakeService) * 100);
+        aggregatedData.brakeFlushToServicePercent = brakeFlushToServicePercent;
+        aggregatedOtherServices['Brake Flush to Service %'] = brakeFlushToServicePercent;
+      } else {
+        aggregatedData.brakeFlushToServicePercent = 0;
+        aggregatedOtherServices['Brake Flush to Service %'] = 0;
+      }
+      
+      // Tire protection percentage
+      const allTires = aggregatedData.allTires || aggregatedData.retailTires || 0;
+      const tireProtection = aggregatedData.tireProtection || 0;
+      
+      if (allTires > 0) {
+        const tireProtectionPercent = Math.ceil((tireProtection / allTires) * 100);
+        aggregatedData.tireProtectionPercent = tireProtectionPercent;
+      } else {
+        aggregatedData.tireProtectionPercent = 0;
+      }
+      
+      // Apply the same template field mappings as advisor scorecards
+      const templateFieldMappings = {
+        // Direct field mappings (camelCase in data)
+        'premiumoilchange': { type: 'direct', field: 'premiumOilChange', label: 'Premium Oil Change' },
+        'oilchange': { type: 'direct', field: 'oilChange', label: 'Oil Change' },
+        'alignments': { type: 'direct', field: 'alignments', label: 'Alignments' },
+        'brakeservice': { type: 'direct', field: 'brakeService', label: 'Brake Service' },
+        'brakeflush': { type: 'direct', field: 'brakeFlush', label: 'Brake Flush' },
+        'engineairfilter': { type: 'direct', field: 'engineAirFilter', label: 'Engine Air Filter' },
+        'cabinairfilter': { type: 'direct', field: 'cabinAirFilter', label: 'Cabin Air Filter' },
+        'coolantflush': { type: 'direct', field: 'coolantFlush', label: 'Coolant Flush' },
+        'differentialservice': { type: 'direct', field: 'differentialService', label: 'Differential Service' },
+        'fuelsystemservice': { type: 'direct', field: 'fuelSystemService', label: 'Fuel System Service' },
+        'powersteeringflush': { type: 'direct', field: 'powerSteeringFlush', label: 'Power Steering Flush' },
+        'transmissionfluidservice': { type: 'direct', field: 'transmissionFluidService', label: 'Transmission Fluid Service' },
+        'fueladditive': { type: 'direct', field: 'fuelAdditive', label: 'Fuel Additive' },
+        'battery': { type: 'direct', field: 'battery', label: 'Battery' },
+        'alltires': { type: 'direct', field: 'allTires', label: 'All Tires' },
+        'retailtires': { type: 'direct', field: 'retailTires', label: 'Retail Tires' },
+        'tireprotection': { type: 'direct', field: 'tireProtection', label: 'Tire Protection' },
+        'acservice': { type: 'direct', field: 'acService', label: 'AC Service' },
+        'wiperblades': { type: 'direct', field: 'wiperBlades', label: 'Wiper Blades' },
+        'shocksstruts': { type: 'direct', field: 'shocksStruts', label: 'Shocks & Struts' },
+        
+        // otherServices nested mappings
+        'tpms': { type: 'nested', field: 'TPMS', label: 'TPMS' },
+        'tirebalance': { type: 'nested', field: 'Tire Balance', label: 'Tire Balance' },
+        'tirerotation': { type: 'nested', field: 'Tire Rotation', label: 'Tire Rotation' },
+        'batteryservice': { type: 'nested', field: 'Battery Service', label: 'Battery Service' },
+        'engineperformanceservice': { type: 'nested', field: 'Engine Performance Service', label: 'Engine Performance Service' },
+        'sparkplugreplacement': { type: 'nested', field: 'Spark Plug Replacement', label: 'Spark Plug Replacement' },
+        'completevehicleinspection': { type: 'nested', field: 'Complete Vehicle Inspection', label: 'Complete Vehicle Inspection' },
+        'climatecontrolservice': { type: 'nested', field: 'Climate Control Service', label: 'Climate Control Service' },
+        'hosereplacement': { type: 'nested', field: 'Hose Replacement', label: 'Hose Replacement' },
+        'beltsreplacement': { type: 'nested', field: 'Belts Replacement', label: 'Belts Replacement' },
+        'headlightrestorationservice': { type: 'nested', field: 'Headlight Restoration Service', label: 'Headlight Restoration Service' },
+        'nitrogen': { type: 'nested', field: 'Nitrogen', label: 'Nitrogen' },
+        'timingbelt': { type: 'nested', field: 'Timing Belt', label: 'Timing Belt' },
+        'transfercaseservice': { type: 'nested', field: 'Transfer Case Service', label: 'Transfer Case Service' },
+        
+        // Percentage fields - these are recalculated from aggregated counts
+        'tireprotection%': { type: 'direct', field: 'tireProtectionPercent', label: 'Tire Protection %' },
+        'potentialalignments%': { type: 'direct', field: 'potentialAlignmentsPercent', label: 'Potential Alignments %' },
+        'brakeflushtoservice%': { type: 'direct', field: 'brakeFlushToServicePercent', label: 'Brake Flush to Service %' },
+        
+        // Alignment fields - these are in main data, not nested otherServices
+        'potentialalignments': { type: 'direct', field: 'potentialAlignments', label: 'Potential Alignments' },
+        'potentialalignmentssold': { type: 'direct', field: 'potentialAlignmentsSold', label: 'Potential Alignments Sold' },
+        'premiumalignments': { type: 'nested', field: 'Premium Alignments', label: 'Premium Alignments' },
+        
+        // Oil change variants
+        'syntheticoilchange': { type: 'nested', field: 'Synthetic Oil Change', label: 'Synthetic Oil Change' },
+        'syntheticblendoilchange': { type: 'nested', field: 'Synthetic Blend Oil Change', label: 'Synthetic Blend Oil Change' },
+        
+        // Core metrics
+        'invoices': { type: 'calculated', field: 'invoices', label: 'Invoices' },
+        'sales': { type: 'calculated', field: 'sales', label: 'Sales' },
+        'gpsales': { type: 'calculated', field: 'gpSales', label: 'GP Sales' },
+        'gppercent': { type: 'calculated', field: 'gpPercent', label: 'GP Percent' },
+        'avg.spend': { type: 'calculated', field: 'avgSpend', label: 'Avg. Spend' },
+        
+        // Filter services
+        'fuelfilter': { type: 'nested', field: 'Fuel Filter', label: 'Fuel Filter' }
+      };
+      
+      // Map services using vendor mappings
+      const mappedServices = {};
+      
+      Object.entries(templateFieldMappings).forEach(([templateKey, mapping]) => {
+        let value = 0;
+        
+        if (mapping.type === 'direct') {
+          value = aggregatedData[mapping.field] || 0;
+        } else if (mapping.type === 'nested') {
+          value = aggregatedOtherServices[mapping.field] || 0;
+        } else if (mapping.type === 'calculated') {
+          if (mapping.field === 'invoices') {
+            value = storeMetrics.invoices;
+          } else if (mapping.field === 'sales') {
+            value = storeMetrics.sales;
+          } else if (mapping.field === 'gpSales') {
+            value = storeMetrics.gpSales;
+          } else if (mapping.field === 'gpPercent') {
+            value = storeMetrics.gpPercent;
+          } else if (mapping.field === 'avgSpend') {
+            value = storeMetrics.invoices > 0 ? storeMetrics.sales / storeMetrics.invoices : 0;
+          }
+        }
+        
+        let displayName = mapping.label;
+        
+        // Apply vendor mappings
+        let vendorMapping = null;
+        if (vendorMappings[templateKey]) {
+          vendorMapping = Object.values(vendorMappings[templateKey])[0];
+        } else if (vendorMappings[mapping.label]) {
+          vendorMapping = Object.values(vendorMappings[mapping.label])[0];
+        } else if (mapping.type === 'direct' && vendorMappings[mapping.field]) {
+          vendorMapping = Object.values(vendorMappings[mapping.field])[0];
+        }
+        
+        if (vendorMapping) {
+          displayName = vendorMapping.productName;
+        }
+        
+        mappedServices[displayName] = value;
+      });
+      
+      // Get store goals
+      const storeGoalsResult = await pool.query(`
+        SELECT 
+          metric_name,
+          target_value,
+          period_type,
+          effective_date
+        FROM goals
+        WHERE goal_type = 'store'
+          AND store_id = $1
+          AND effective_date <= CURRENT_DATE
+        ORDER BY effective_date DESC
+      `, [store.id]);
+      
+      const goals = {};
+      storeGoalsResult.rows.forEach(row => {
+        if (!goals[row.metric_name]) {
+          goals[row.metric_name] = {
+            target: parseFloat(row.target_value),
+            periodType: row.period_type,
+            effectiveDate: row.effective_date
+          };
+        }
+      });
+      
+      // Get store manager info (currently not available - would need manager_user_id column)
+      let managerInfo = null;
+      // TODO: Add manager_user_id column to stores table and implement manager lookup
+      
+      storeScoreCards.push({
+        storeId: store.id,
+        storeName: store.name,
+        marketId: store.market_id,
+        managerInfo,
+        advisorCount: parseInt(storeData.advisorCount || 0), // From store data or default to 0
+        metrics: {
+          invoices: storeMetrics.invoices,
+          sales: storeMetrics.sales,
+          gpSales: storeMetrics.gpSales,
+          gpPercent: Math.ceil(storeMetrics.gpPercent),
+          avgSpend: storeMetrics.invoices > 0 ? storeMetrics.sales / storeMetrics.invoices : 0
+        },
+        services: mappedServices,
+        goals: goals,
+        lastUpdated: new Date().toISOString()
+      });
+      
+      console.log(`✅ Store ${store.name}: ${storeMetrics.invoices} invoices, $${storeMetrics.sales} sales`);
+    }
+    
+    console.log(`🏪 Processed ${storeScoreCards.length} stores for market ${marketId}`);
+    
+    res.json({
+      marketId: parseInt(marketId),
+      period: {
+        year: targetYear,
+        month: targetMonth
+      },
+      stores: storeScoreCards,
+      totalStores: storeScoreCards.length,
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error getting store scorecards:', error);
+    res.status(500).json({ message: 'Failed to get store scorecards' });
+  }
+});
+
+// Get market scorecards 
+router.get('/markets', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { mtdMonth, mtdYear } = req.query;
+    
+    // Check permissions - advisors cannot view market scorecards
+    if (req.user.role === 'advisor') {
+      return res.status(403).json({ message: 'Forbidden: Advisors cannot view market scorecards' });
+    }
+    
+    console.log(`🏬 Getting market scorecards for MTD: ${mtdYear}-${mtdMonth}`);
+    
+    // Parse MTD parameters or use current month
+    let targetYear, targetMonth;
+    if (mtdMonth && mtdYear) {
+      targetYear = parseInt(mtdYear);
+      targetMonth = parseInt(mtdMonth);
+    } else {
+      const now = new Date();
+      targetYear = now.getFullYear();
+      targetMonth = now.getMonth() + 1;
+    }
+    
+    // Get all markets
+    const marketsResult = await pool.query(`
+      SELECT id, name, description
+      FROM markets 
+      ORDER BY name
+    `);
+    
+    if (marketsResult.rows.length === 0) {
+      return res.status(404).json({ message: 'No markets found' });
+    }
+    
+    console.log(`🏬 Found ${marketsResult.rows.length} markets`);
+    
+    // Get vendor mappings for all markets
+    const vendorMappingsResult = await pool.query(`
+      SELECT DISTINCT
+        vpm.vendor_id,
+        vpm.service_field,
+        vpm.product_name,
+        vt.name as vendor_name,
+        mt.market_id
+      FROM market_tags mt
+      JOIN vendor_product_mappings vpm ON vpm.vendor_id = mt.tag_id
+      JOIN vendor_tags vt ON vt.id = vpm.vendor_id
+    `);
+    
+    // Build vendor mapping lookup
+    const vendorMappings = {};
+    vendorMappingsResult.rows.forEach(row => {
+      if (!vendorMappings[row.market_id]) {
+        vendorMappings[row.market_id] = {};
+      }
+      if (!vendorMappings[row.market_id][row.service_field]) {
+        vendorMappings[row.market_id][row.service_field] = {};
+      }
+      vendorMappings[row.market_id][row.service_field][row.vendor_id] = {
+        productName: row.product_name,
+        vendorName: row.vendor_name
+      };
+    });
+    
+    // Process each market
+    const marketScoreCards = [];
+    
+    for (const market of marketsResult.rows) {
+      console.log(`\n🏬 Processing market: ${market.name} (ID: ${market.id})`);
+      
+      // Get latest market-level performance data for this market for the target month
+      const performanceResult = await pool.query(`
+        SELECT 
+          pd.data
+        FROM performance_data pd
+        WHERE pd.market_id = $1
+          AND pd.data_type = 'services'
+          AND pd.store_id IS NULL
+          AND pd.advisor_user_id IS NULL
+          AND EXTRACT(YEAR FROM pd.upload_date) = $2
+          AND EXTRACT(MONTH FROM pd.upload_date) = $3
+        ORDER BY pd.upload_date DESC, pd.id DESC
+        LIMIT 1
+      `, [market.id, targetYear, targetMonth]);
+      
+      if (performanceResult.rows.length === 0) {
+        console.log(`⚠️ No market-level performance data found for market ${market.name} in ${targetYear}-${targetMonth.toString().padStart(2, '0')}`);
+        continue;
+      }
+      
+      console.log(`📊 Found market-level performance data for ${market.name}`);
+      
+      // Use direct market data (no aggregation needed)
+      const marketData = performanceResult.rows[0].data;
+      
+      const marketMetrics = {
+        invoices: parseInt(marketData.invoices || 0),
+        sales: parseFloat(marketData.sales || 0),
+        gpSales: parseFloat(marketData.gpSales || 0),
+        gpPercent: parseFloat(marketData.gpPercent || 0)
+      };
+      
+      // Add average spend calculation
+      marketMetrics.avgSpend = marketMetrics.invoices > 0 ? marketMetrics.sales / marketMetrics.invoices : 0;
+      
+      // Use the data directly (no aggregation)
+      const aggregatedData = { ...marketData };
+      const aggregatedOtherServices = marketData.otherServices || {};
+      
+      // Recalculate percentage fields from aggregated counts
+      const potentialAlignments = aggregatedData.potentialAlignments || aggregatedOtherServices['Potential Alignments'] || 0;
+      const potentialAlignmentsSold = aggregatedData.potentialAlignmentsSold || aggregatedOtherServices['Potential Alignments Sold'] || 0;
+      
+      if (potentialAlignments > 0) {
+        const potentialAlignmentsPercent = Math.ceil((potentialAlignmentsSold / potentialAlignments) * 100);
+        aggregatedData.potentialAlignmentsPercent = potentialAlignmentsPercent;
+        aggregatedOtherServices['Potential Alignments %'] = potentialAlignmentsPercent;
+      } else {
+        aggregatedData.potentialAlignmentsPercent = 0;
+        aggregatedOtherServices['Potential Alignments %'] = 0;
+      }
+      
+      // Apply the same template field mappings as store/advisor scorecards
+      const templateFieldMappings = {
+        // Core metrics
+        'invoices': { type: 'direct', field: 'invoices', label: 'Invoices' },
+        'sales': { type: 'direct', field: 'sales', label: 'Sales' },
+        'gpsales': { type: 'direct', field: 'gpSales', label: 'GP Sales' },
+        'gppercent': { type: 'direct', field: 'gpPercent', label: 'GP %' },
+        'avg.spend': { type: 'direct', field: 'avgSpend', label: 'Avg Spend' },
+        
+        // Service fields (same as store scorecards)
+        'premiumoilchange': { type: 'direct', field: 'premiumOilChange', label: 'Premium Oil Change' },
+        'oilchange': { type: 'direct', field: 'oilChange', label: 'Oil Change' },
+        'alignments': { type: 'direct', field: 'alignments', label: 'Alignments' },
+        'brakeservice': { type: 'direct', field: 'brakeService', label: 'Brake Service' },
+        'brakeflush': { type: 'direct', field: 'brakeFlush', label: 'Brake Flush' },
+        'engineairfilter': { type: 'direct', field: 'engineAirFilter', label: 'Engine Air Filter' },
+        'cabinairfilter': { type: 'direct', field: 'cabinAirFilter', label: 'Cabin Air Filter' },
+        'coolantflush': { type: 'direct', field: 'coolantFlush', label: 'Coolant Flush' },
+        'differentialservice': { type: 'direct', field: 'differentialService', label: 'Differential Service' },
+        'fuelsystemservice': { type: 'direct', field: 'fuelSystemService', label: 'Fuel System Service' },
+        'powersteeringflush': { type: 'direct', field: 'powerSteeringFlush', label: 'Power Steering Flush' },
+        'transmissionfluidservice': { type: 'direct', field: 'transmissionFluidService', label: 'Transmission Fluid Service' },
+        'fueladditive': { type: 'direct', field: 'fuelAdditive', label: 'Fuel Additive' },
+        'battery': { type: 'direct', field: 'battery', label: 'Battery' },
+        'alltires': { type: 'direct', field: 'allTires', label: 'All Tires' },
+        'retailtires': { type: 'direct', field: 'retailTires', label: 'Retail Tires' },
+        'tireprotection': { type: 'direct', field: 'tireProtection', label: 'Tire Protection' },
+        'acservice': { type: 'direct', field: 'acService', label: 'AC Service' },
+        'wiperblades': { type: 'direct', field: 'wiperBlades', label: 'Wiper Blades' },
+        'shocksstruts': { type: 'direct', field: 'shocksStruts', label: 'Shocks & Struts' },
+        
+        // Percentage fields
+        'potentialalignments%': { type: 'direct', field: 'potentialAlignmentsPercent', label: 'Potential Alignments %' },
+        'potentialalignments': { type: 'direct', field: 'potentialAlignments', label: 'Potential Alignments' },
+        'potentialalignmentssold': { type: 'direct', field: 'potentialAlignmentsSold', label: 'Potential Alignments Sold' }
+      };
+      
+      // Convert services using template mappings
+      const services = {};
+      const vendorMapping = vendorMappings[market.id] || {};
+      
+      Object.entries(templateFieldMappings).forEach(([templateKey, mapping]) => {
+        if (mapping.type === 'direct') {
+          let value = aggregatedData[mapping.field] || 0;
+          
+          // Apply vendor branding if available
+          if (vendorMapping[templateKey]) {
+            const vendors = Object.values(vendorMapping[templateKey]);
+            if (vendors.length > 0) {
+              services[vendors[0].productName] = value;
+            } else {
+              services[mapping.label] = value;
+            }
+          } else {
+            services[mapping.label] = value;
+          }
+        }
+      });
+      
+      // Get goals for this market (if any)
+      const goalsResult = await pool.query(`
+        SELECT metric_name as service_key, target_value, period_type, effective_date
+        FROM goals 
+        WHERE market_id = $1 AND store_id IS NULL AND advisor_user_id IS NULL
+        ORDER BY effective_date DESC
+      `, [market.id]);
+      
+      const goals = {};
+      goalsResult.rows.forEach(goal => {
+        goals[goal.service_key] = {
+          target: goal.target_value,
+          periodType: goal.period_type,
+          effectiveDate: goal.effective_date
+        };
+      });
+      
+      marketScoreCards.push({
+        marketId: market.id,
+        marketName: market.name,
+        description: market.description,
+        metrics: marketMetrics,
+        services,
+        goals,
+        lastUpdated: new Date().toISOString()
+      });
+      
+      console.log(`✅ Market ${market.name}: ${marketMetrics.invoices} invoices, $${marketMetrics.sales} sales`);
+    }
+    
+    console.log(`🏬 Processed ${marketScoreCards.length} markets`);
+    
+    res.json({
+      period: {
+        year: targetYear,
+        month: targetMonth
+      },
+      markets: marketScoreCards,
+      totalMarkets: marketScoreCards.length,
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error getting market scorecards:', error);
+    res.status(500).json({ message: 'Failed to get market scorecards' });
+  }
+});
+
 module.exports = router;

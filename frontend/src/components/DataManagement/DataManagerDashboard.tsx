@@ -25,6 +25,7 @@ import DataTroubleshooter from './DataTroubleshooter';
 import DatabaseSchemaViewer from './DatabaseSchemaViewer';
 import DataVerificationViewer from './DataVerificationViewer';
 import DataAuditViewer from './DataAuditViewer';
+import DataLevelBreakdown from './DataLevelBreakdown';
 import EntityConfirmation from './EntityConfirmation';
 
 interface UploadSession {
@@ -49,7 +50,7 @@ interface DataStats {
 
 const DataManagerDashboard: React.FC = () => {
   const { token } = useAuth();
-  const [activeView, setActiveView] = useState<'upload' | 'history' | 'mappings' | 'monitoring' | 'troubleshoot' | 'schema' | 'verification' | 'audit'>('upload');
+  const [activeView, setActiveView] = useState<'upload' | 'history' | 'mappings' | 'monitoring' | 'troubleshoot' | 'schema' | 'verification' | 'audit' | 'breakdown'>('upload');
   const [pendingSessions, setPendingSessions] = useState<UploadSession[]>([]);
   const [dataStats, setDataStats] = useState<DataStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -265,6 +266,8 @@ const DataManagerDashboard: React.FC = () => {
         return <DataVerificationViewer />;
       case 'audit':
         return <DataAuditViewer />;
+      case 'breakdown':
+        return <DataLevelBreakdown />;
       default:
         return <UnifiedUploader onUploadComplete={loadDashboardData} />;
     }
@@ -358,6 +361,7 @@ const DataManagerDashboard: React.FC = () => {
         <nav className="-mb-px flex space-x-8">
           {[
             { id: 'upload', label: 'Upload Services', icon: CloudArrowUpIcon },
+            { id: 'breakdown', label: 'Data Breakdown', icon: BuildingStorefrontIcon },
             { id: 'history', label: 'Upload History', icon: FolderOpenIcon },
             { id: 'mappings', label: 'Advisor Mappings', icon: UserGroupIcon },
             { id: 'audit', label: 'Data Audit', icon: ShieldCheckIcon },
