@@ -495,12 +495,47 @@ router.get('/upload/session/:sessionId', async (req, res) => {
 
     const session = await processor.getUploadSession(sessionId);
     
+    // Enhance advisor data with existing mappings
+    const enhancedAdvisors = await Promise.all(
+      session.discovered_advisors.map(async (advisor) => {
+        // Check if advisor already has a mapping
+        const existingMapping = await pool.query(
+          'SELECT user_id, spreadsheet_name FROM advisor_mappings WHERE spreadsheet_name = $1 AND is_active = true',
+          [advisor.name]
+        );
+        
+        if (existingMapping.rows.length > 0) {
+          // Get user details for display
+          const userDetails = await pool.query(
+            'SELECT id, first_name, last_name FROM users WHERE id = $1',
+            [existingMapping.rows[0].user_id]
+          );
+          
+          return {
+            ...advisor,
+            action: 'map_user',
+            existing_user_id: existingMapping.rows[0].user_id,
+            mappedUserName: userDetails.rows[0] ? 
+              `${userDetails.rows[0].first_name} ${userDetails.rows[0].last_name}` : 
+              'Unknown User'
+          };
+        }
+        
+        return advisor;
+      })
+    );
+    
     res.json({
       session,
       discovered: {
         markets: session.discovered_markets,
         stores: session.discovered_stores,
         advisors: session.discovered_advisors
+      },
+      enhanced: {
+        markets: session.discovered_markets,
+        stores: session.discovered_stores,
+        advisors: enhancedAdvisors
       }
     });
 
