@@ -1497,7 +1497,9 @@ router.get('/markets', async (req, res) => {
         // Percentage fields
         'potentialalignments%': { type: 'direct', field: 'potentialAlignmentsPercent', label: 'Potential Alignments %' },
         'potentialalignments': { type: 'direct', field: 'potentialAlignments', label: 'Potential Alignments' },
-        'potentialalignmentssold': { type: 'direct', field: 'potentialAlignmentsSold', label: 'Potential Alignments Sold' }
+        'potentialalignmentssold': { type: 'direct', field: 'potentialAlignmentsSold', label: 'Potential Alignments Sold' },
+        'brakeflushtoservice%': { type: 'direct', field: 'brakeFlushToServicePercent', label: 'Brake Flush to Service %' },
+        'tireprotection%': { type: 'direct', field: 'tireProtectionPercent', label: 'Tire Protection %' }
       };
       
       // Convert services using template mappings
@@ -1521,6 +1523,21 @@ router.get('/markets', async (req, res) => {
           }
         }
       });
+      
+      // Also include any fields from otherServices that might have been missed
+      if (aggregatedOtherServices) {
+        // Add Shocks & Struts if it's in otherServices
+        if (aggregatedOtherServices['Shocks & Struts'] !== undefined && !services['Shocks & Struts']) {
+          services['Shocks & Struts'] = aggregatedOtherServices['Shocks & Struts'];
+        }
+        // Add percentage fields from otherServices
+        if (aggregatedOtherServices['Brake Flush to Service %'] !== undefined) {
+          services['Brake Flush to Service %'] = aggregatedOtherServices['Brake Flush to Service %'];
+        }
+        if (aggregatedOtherServices['Tire Protection %'] !== undefined) {
+          services['Tire Protection %'] = aggregatedOtherServices['Tire Protection %'];
+        }
+      }
       
       // Get goals for this market (if any)
       const goalsResult = await pool.query(`
