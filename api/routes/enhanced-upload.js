@@ -495,6 +495,49 @@ router.get('/upload/session/:sessionId', async (req, res) => {
 
     const session = await processor.getUploadSession(sessionId);
     
+    // Enhance market data with existing mappings
+    const enhancedMarkets = await Promise.all(
+      session.discovered_markets.map(async (market) => {
+        // Check if market already exists
+        const existingMarket = await pool.query(
+          'SELECT id, name FROM markets WHERE name = $1',
+          [market.name]
+        );
+        
+        if (existingMarket.rows.length > 0) {
+          return {
+            ...market,
+            action: 'map',
+            existing_id: existingMarket.rows[0].id
+          };
+        }
+        
+        return market;
+      })
+    );
+    
+    // Enhance store data with existing mappings
+    const enhancedStores = await Promise.all(
+      session.discovered_stores.map(async (store) => {
+        // Check if store already exists
+        const existingStore = await pool.query(
+          'SELECT id, name, market_id FROM stores WHERE name = $1',
+          [store.name]
+        );
+        
+        if (existingStore.rows.length > 0) {
+          return {
+            ...store,
+            action: 'map',
+            existing_id: existingStore.rows[0].id,
+            existing_market_id: existingStore.rows[0].market_id
+          };
+        }
+        
+        return store;
+      })
+    );
+    
     // Enhance advisor data with existing mappings
     const enhancedAdvisors = await Promise.all(
       session.discovered_advisors.map(async (advisor) => {
@@ -533,8 +576,8 @@ router.get('/upload/session/:sessionId', async (req, res) => {
         advisors: session.discovered_advisors
       },
       enhanced: {
-        markets: session.discovered_markets,
-        stores: session.discovered_stores,
+        markets: enhancedMarkets,
+        stores: enhancedStores,
         advisors: enhancedAdvisors
       }
     });
