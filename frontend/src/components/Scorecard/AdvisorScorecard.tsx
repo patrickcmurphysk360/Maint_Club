@@ -110,7 +110,17 @@ const AdvisorScorecard: React.FC<AdvisorScorecardProps> = ({
 
   // Get service value from advisor data (with fallback to 0)
   const getServiceValue = (serviceKey: string): number => {
-    return (advisor as any)[serviceKey] || 0;
+    const value = (advisor as any)[serviceKey] || 0;
+    
+    // Debug for problematic fields
+    if (serviceKey === 'brakeflushtoservice%' || serviceKey.includes('potentialalignments')) {
+      console.log(`🔧 getServiceValue: ${serviceKey} = ${value} (from advisor.${serviceKey})`);
+      console.log(`   Available advisor keys:`, Object.keys(advisor).filter(k => 
+        k.includes('brake') || k.includes('potential') || k.includes('tire')
+      ));
+    }
+    
+    return value;
   };
 
   // Get KPI metrics from template or fallback to default

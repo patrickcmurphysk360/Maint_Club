@@ -118,6 +118,12 @@ router.get('/advisor/:userId', async (req, res) => {
     const aggregatedData = {};
     const aggregatedOtherServices = {};
     
+    // Clear any percentage fields that might interfere with recalculation
+    const percentageFields = ['brakeFlushToServicePercent', 'potentialAlignmentsPercent', 'tireProtectionPercent'];
+    percentageFields.forEach(field => {
+      aggregatedData[field] = undefined;
+    });
+    
     // Aggregate data from latest performance record per store (MTD snapshots)
     performanceResult.rows.forEach((row, index) => {
       const data = row.data;
@@ -202,6 +208,12 @@ router.get('/advisor/:userId', async (req, res) => {
       aggregatedOtherServices['Potential Alignments %'] = potentialAlignmentsPercent;
       
       console.log(`📊 Recalculated Potential Alignments %: ${potentialAlignmentsSold} / ${potentialAlignments} = ${potentialAlignmentsPercent}% (rounded up)`);
+    } else {
+      // When no potential alignments, percentage is 0%
+      aggregatedData.potentialAlignmentsPercent = 0;
+      aggregatedOtherServices['Potential Alignments %'] = 0;
+      
+      console.log(`📊 Potential Alignments %: 0% (no potential alignments)`);
     }
     
     // Tire Protection %
@@ -214,6 +226,12 @@ router.get('/advisor/:userId', async (req, res) => {
       aggregatedOtherServices['Tire Protection %'] = tireProtectionPercent;
       
       console.log(`📊 Recalculated Tire Protection %: ${tireProtection} / ${retailTires} = ${tireProtectionPercent}% (rounded up)`);
+    } else {
+      // When no retail tires, percentage is 0%
+      aggregatedData.tireProtectionPercent = 0;
+      aggregatedOtherServices['Tire Protection %'] = 0;
+      
+      console.log(`📊 Tire Protection %: 0% (no retail tires)`);
     }
     
     // Brake Flush to Service %
@@ -226,7 +244,20 @@ router.get('/advisor/:userId', async (req, res) => {
       aggregatedOtherServices['Brake Flush to Service %'] = brakeFlushToServicePercent;
       
       console.log(`📊 Recalculated Brake Flush to Service %: ${brakeFlush} / ${brakeService} = ${brakeFlushToServicePercent}% (rounded up)`);
+    } else {
+      // When no brake services, percentage is 0%
+      aggregatedData.brakeFlushToServicePercent = 0;
+      aggregatedOtherServices['Brake Flush to Service %'] = 0;
+      
+      console.log(`📊 Brake Flush to Service %: 0% (no brake services)`);
     }
+    
+    // Debug: Show the full aggregatedData for brake flush fields
+    console.log(`🔍 aggregatedData brake fields:`, {
+      brakeService: aggregatedData.brakeService,
+      brakeFlush: aggregatedData.brakeFlush,
+      brakeFlushToServicePercent: aggregatedData.brakeFlushToServicePercent
+    });
     
     // Create smart field mapping that handles template field keys
     const mappedServices = {};
@@ -305,6 +336,13 @@ router.get('/advisor/:userId', async (req, res) => {
         // Debug potential alignments mapping
         if (templateKey.includes('potential')) {
           console.log(`🎯 Mapping ${templateKey} (${mapping.field}): ${value} from aggregatedData`);
+        }
+        // Debug brake flush percentage mapping
+        if (templateKey === 'brakeflushtoservice%') {
+          console.log(`🔧 Mapping Brake Flush to Service % - templateKey: ${templateKey}, field: ${mapping.field}`);
+          console.log(`   aggregatedData.${mapping.field} = ${aggregatedData[mapping.field]}`);
+          console.log(`   aggregatedData.brakeFlushToServicePercent = ${aggregatedData.brakeFlushToServicePercent}`);
+          console.log(`   Final value = ${value}`);
         }
       } else if (mapping.type === 'nested') {
         value = aggregatedOtherServices[mapping.field] || 0;
@@ -769,7 +807,16 @@ router.get('/advisor/:userId/by-store', async (req, res) => {
       'sales': { type: 'calculated', field: 'sales', label: 'Sales' },
       'gpsales': { type: 'calculated', field: 'gpSales', label: 'GP Sales' },
       'gppercent': { type: 'calculated', field: 'gpPercent', label: 'GP Percent' },
-      'avg.spend': { type: 'calculated', field: 'avgSpend', label: 'Avg. Spend' }
+      'avg.spend': { type: 'calculated', field: 'avgSpend', label: 'Avg. Spend' },
+      
+      // Percentage fields - need special handling for individual stores
+      'tireprotection%': { type: 'percentage', field: 'tireProtectionPercent', label: 'Tire Protection %' },
+      'potentialalignments%': { type: 'percentage', field: 'potentialAlignmentsPercent', label: 'Potential Alignments %' },
+      'brakeflushtoservice%': { type: 'percentage', field: 'brakeFlushToServicePercent', label: 'Brake Flush to Service %' },
+      
+      // Potential alignment count fields
+      'potentialalignments': { type: 'direct', field: 'potentialAlignments', label: 'Potential Alignments' },
+      'potentialalignmentssold': { type: 'direct', field: 'potentialAlignmentsSold', label: 'Potential Alignments Sold' }
     };
     
     // Apply mapping to each store's services
@@ -783,6 +830,25 @@ router.get('/advisor/:userId/by-store', async (req, res) => {
           value = storeData.metrics.services[mapping.field] || 0;
         } else if (mapping.type === 'nested') {
           value = storeData.metrics.services[mapping.field] || 0;
+        } else if (mapping.type === 'percentage') {
+          // Handle percentage fields with proper calculation for individual stores
+          if (mapping.field === 'brakeFlushToServicePercent') {
+            const brakeService = storeData.metrics.services['brakeService'] || 0;
+            const brakeFlush = storeData.metrics.services['brakeFlush'] || 0;
+            value = brakeService > 0 ? Math.ceil((brakeFlush / brakeService) * 100) : 0;
+            console.log(`🔧 BY-STORE: ${storeData.storeName} - Brake Service: ${brakeService}, Brake Flush: ${brakeFlush}, Calculated %: ${value}`);
+          } else if (mapping.field === 'potentialAlignmentsPercent') {
+            const potentialAlignments = storeData.metrics.services['potentialAlignments'] || 0;
+            const potentialAlignmentsSold = storeData.metrics.services['potentialAlignmentsSold'] || 0;
+            value = potentialAlignments > 0 ? Math.ceil((potentialAlignmentsSold / potentialAlignments) * 100) : 0;
+          } else if (mapping.field === 'tireProtectionPercent') {
+            const retailTires = storeData.metrics.services['retailTires'] || 0;
+            const tireProtection = storeData.metrics.services['tireProtection'] || 0;
+            value = retailTires > 0 ? Math.ceil((tireProtection / retailTires) * 100) : 0;
+          } else {
+            // Fallback to stored percentage value
+            value = storeData.metrics.services[mapping.field] || 0;
+          }
         } else if (mapping.type === 'calculated') {
           if (mapping.field === 'invoices') {
             value = storeData.metrics.invoices;
@@ -841,6 +907,24 @@ router.get('/advisor/:userId/by-store', async (req, res) => {
         value = totalMetrics.services[mapping.field] || 0;
       } else if (mapping.type === 'nested') {
         value = totalMetrics.services[mapping.field] || 0;
+      } else if (mapping.type === 'percentage') {
+        // Handle percentage fields with proper calculation for combined totals
+        if (mapping.field === 'brakeFlushToServicePercent') {
+          const brakeService = totalMetrics.services['brakeService'] || 0;
+          const brakeFlush = totalMetrics.services['brakeFlush'] || 0;
+          value = brakeService > 0 ? Math.ceil((brakeFlush / brakeService) * 100) : 0;
+        } else if (mapping.field === 'potentialAlignmentsPercent') {
+          const potentialAlignments = totalMetrics.services['potentialAlignments'] || 0;
+          const potentialAlignmentsSold = totalMetrics.services['potentialAlignmentsSold'] || 0;
+          value = potentialAlignments > 0 ? Math.ceil((potentialAlignmentsSold / potentialAlignments) * 100) : 0;
+        } else if (mapping.field === 'tireProtectionPercent') {
+          const retailTires = totalMetrics.services['retailTires'] || 0;
+          const tireProtection = totalMetrics.services['tireProtection'] || 0;
+          value = retailTires > 0 ? Math.ceil((tireProtection / retailTires) * 100) : 0;
+        } else {
+          // Fallback to stored percentage value
+          value = totalMetrics.services[mapping.field] || 0;
+        }
       } else if (mapping.type === 'calculated') {
         if (mapping.field === 'invoices') {
           value = totalMetrics.invoices;

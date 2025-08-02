@@ -154,7 +154,7 @@ class ExcelParser {
         // Service categories
         alignments: this.parseNumber(this.getCellValue(row, headers, 'Alignments')),
         brakeService: this.parseNumber(this.getCellValue(row, headers, 'Brake Service')),
-        brakeFlush: this.parseNumber(this.getCellValue(row, headers, 'Brake Flush')),
+        brakeFlush: this.parseBrakeFlush(row, headers),
         oilChange: this.parseNumber(this.getCellValue(row, headers, 'Oil Change')),
         engineAirFilter: this.parseNumber(this.getCellValue(row, headers, 'Engine Air Filter')),
         cabinAirFilter: this.parseNumber(this.getCellValue(row, headers, 'Cabin Air Filter')),
@@ -250,7 +250,14 @@ class ExcelParser {
 
   // Helper methods
   getCellValue(row, headers, columnName) {
-    const index = headers.findIndex(h => h && h.toString().toLowerCase().includes(columnName.toLowerCase()));
+    // First try exact match (case-insensitive)
+    let index = headers.findIndex(h => h && h.toString().toLowerCase().trim() === columnName.toLowerCase().trim());
+    
+    // If no exact match, fall back to includes() for backward compatibility
+    if (index < 0) {
+      index = headers.findIndex(h => h && h.toString().toLowerCase().includes(columnName.toLowerCase()));
+    }
+    
     return index >= 0 ? row[index] : null;
   }
 
@@ -271,6 +278,32 @@ class ExcelParser {
     let str = value.toString().replace('%', '');
     const num = parseFloat(str);
     return isNaN(num) ? null : num;
+  }
+
+  parseBrakeFlush(row, headers) {
+    // Get the brake flush value
+    const brakeFlushValue = this.getCellValue(row, headers, 'Brake Flush');
+    
+    if (brakeFlushValue === null || brakeFlushValue === undefined || brakeFlushValue === '') {
+      return null;
+    }
+    
+    // Parse the value
+    const parsedValue = this.parseNumber(brakeFlushValue);
+    
+    // Check if this appears to be a percentage (same as brake flush to service %)
+    const brakeFlushPercent = this.parsePercent(this.getCellValue(row, headers, 'Brake Flush to Service %'));
+    const brakeService = this.parseNumber(this.getCellValue(row, headers, 'Brake Service'));
+    
+    // If brake flush value equals the percentage, it's likely the wrong column
+    // Calculate the actual count from brake service and percentage
+    if (parsedValue && brakeFlushPercent && parsedValue === brakeFlushPercent && brakeService && brakeService > 0) {
+      console.log(`⚠️ Brake flush appears to be percentage (${parsedValue}), calculating from brake service (${brakeService}) × ${brakeFlushPercent}%`);
+      return Math.round(brakeService * brakeFlushPercent / 100);
+    }
+    
+    // If the value is reasonable (integer or small decimal), use it as-is
+    return parsedValue;
   }
 
   isEmptyRow(row) {

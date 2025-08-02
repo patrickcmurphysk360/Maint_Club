@@ -154,8 +154,12 @@ const StorePerformanceTabs: React.FC<StorePerformanceTabsProps> = ({
       // Add all service values using the services object
       ...Object.fromEntries(
         Object.entries(storeData.services).map(([serviceName, value]) => {
-          // Convert service name to template key format (lowercase, no spaces)
-          const templateKey = serviceName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          // Convert service name to template key format (lowercase, keep % for percentages)
+          const templateKey = serviceName.toLowerCase().replace(/[^a-z0-9%]/g, '');
+          // Debug percentage fields
+          if (serviceName.includes('%') || serviceName.includes('brake') || serviceName.includes('potential')) {
+            console.log(`🔧 STORE TAB: "${serviceName}" -> "${templateKey}" = ${value}`);
+          }
           return [templateKey, value];
         })
       ),
@@ -185,7 +189,7 @@ const StorePerformanceTabs: React.FC<StorePerformanceTabsProps> = ({
       // Add all service values
       ...Object.fromEntries(
         Object.entries(rollupData.services).map(([serviceName, value]) => {
-          const templateKey = serviceName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const templateKey = serviceName.toLowerCase().replace(/[^a-z0-9%]/g, '');
           return [templateKey, value];
         })
       ),

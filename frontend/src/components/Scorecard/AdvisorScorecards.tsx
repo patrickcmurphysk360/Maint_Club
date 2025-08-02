@@ -143,9 +143,7 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
       alltires: apiServices['All Tires'] || 0,
       retailtires: apiServices['Retail Tires'] || 0,
       tireprotection: apiServices['Tire Protection'] || 0,
-      tireprotectionPercent: apiServices['Tire Protection %'] || 
-                            apiServices['tireProtectionPercent'] || 
-                            apiServices['TireProtectionPercent'] || 0,
+      // Template field key for tire protection percentage
       'tireprotection%': apiServices['Tire Protection %'] || 
                         apiServices['tireProtectionPercent'] || 
                         apiServices['TireProtectionPercent'] || 0,
@@ -153,16 +151,14 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
       tirerotation: apiServices['Tire Rotation'] || 0,
       alignments: apiServices['Alignments'] || 0,
       
-      // Potential Alignments fields - check multiple possible key formats
+      // Potential Alignments fields - use template field keys
       potentialalignments: apiServices['Potential Alignments'] || 
                           apiServices['potentialAlignments'] || 
                           apiServices['PotentialAlignments'] || 0,
       potentialalignmentssold: apiServices['Potential Alignments Sold'] || 
                               apiServices['potentialAlignmentsSold'] || 
                               apiServices['PotentialAlignmentsSold'] || 0,
-      potentialalignmentsPercent: apiServices['Potential Alignments %'] || 
-                                 apiServices['potentialAlignmentsPercent'] || 
-                                 apiServices['PotentialAlignmentsPercent'] || 0,
+      // Template field key for potential alignments percentage
       'potentialalignments%': apiServices['Potential Alignments %'] || 
                              apiServices['potentialAlignmentsPercent'] || 
                              apiServices['PotentialAlignmentsPercent'] || 0,
@@ -209,9 +205,7 @@ const AdvisorScorecards: React.FC<AdvisorScorecardsProps> = ({ onMessageAdvisor 
       // Brake Service
       brakeservice: apiServices['Brake Service'] || 0,
       brakeflush: apiServices['Brake Flush'] || 0,
-      brakeflushtoservicePercent: apiServices['Brake Flush to Service %'] || 
-                                  apiServices['brakeFlushToServicePercent'] || 
-                                  apiServices['BrakeFlushToServicePercent'] || 0,
+      // Template field key for brake flush percentage
       'brakeflushtoservice%': apiServices['Brake Flush to Service %'] || 
                              apiServices['brakeFlushToServicePercent'] || 
                              apiServices['BrakeFlushToServicePercent'] || 0
