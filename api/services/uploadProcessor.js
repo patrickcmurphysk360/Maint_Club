@@ -673,6 +673,11 @@ class UploadProcessor {
       }
     }
 
+    // Auto-generate store-level aggregated data
+    console.log('🏪 Auto-generating store-level aggregated data...');
+    const storeAggregationCount = await this.generateStoreLevelData(client, session.report_date, marketMappings, storeMappings);
+    console.log(`✅ Generated ${storeAggregationCount} store-level records`);
+
     // Process store-level data if available in the spreadsheet
     if (rawData.stores && rawData.stores.length > 0) {
       console.log(`📊 Processing ${rawData.stores.length} store-level records`);
@@ -733,6 +738,128 @@ class UploadProcessor {
     }
 
     return processedCount;
+  }
+
+  /**
+   * Generate store-level aggregated data from advisor-level data
+   */
+  async generateStoreLevelData(client, reportDate, marketMappings, storeMappings) {
+    let generatedCount = 0;
+    
+    // Get unique stores that have advisor data for this date
+    const storesWithData = await client.query(`
+      SELECT DISTINCT 
+        pd.store_id,
+        pd.market_id,
+        s.name as store_name,
+        m.name as market_name
+      FROM performance_data pd
+      JOIN stores s ON pd.store_id = s.id
+      JOIN markets m ON pd.market_id = m.id
+      WHERE pd.upload_date = $1
+      AND pd.advisor_user_id IS NOT NULL
+      AND pd.store_id IS NOT NULL
+      ORDER BY s.name
+    `, [reportDate]);
+    
+    for (const store of storesWithData.rows) {
+      // Aggregate all advisor data for this store
+      const aggregatedData = await client.query(`
+        SELECT 
+          SUM(CAST(COALESCE(data->>'allTires', '0') AS INTEGER)) as allTires,
+          SUM(CAST(COALESCE(data->>'retailTires', '0') AS INTEGER)) as retailTires,
+          SUM(CAST(COALESCE(data->>'tireProtection', '0') AS INTEGER)) as tireProtection,
+          SUM(CAST(COALESCE(data->>'acService', '0') AS INTEGER)) as acService,
+          SUM(CAST(COALESCE(data->>'wiperBlades', '0') AS INTEGER)) as wiperBlades,
+          SUM(CAST(COALESCE(data->>'brakeService', '0') AS INTEGER)) as brakeService,
+          SUM(CAST(COALESCE(data->>'brakeFlush', '0') AS INTEGER)) as brakeFlush,
+          SUM(CAST(COALESCE(data->>'alignmentCheck', '0') AS INTEGER)) as alignmentCheck,
+          SUM(CAST(COALESCE(data->>'alignmentService', '0') AS INTEGER)) as alignmentService,
+          SUM(CAST(COALESCE(data->>'potentialAlignments', '0') AS INTEGER)) as potentialAlignments,
+          SUM(CAST(COALESCE(data->>'potentialAlignmentsSold', '0') AS INTEGER)) as potentialAlignmentsSold,
+          SUM(CAST(COALESCE(data->>'shocksStruts', '0') AS INTEGER)) as shocksStruts,
+          SUM(CAST(COALESCE(data->>'sales', '0') AS NUMERIC)) as sales,
+          SUM(CAST(COALESCE(data->>'gpSales', '0') AS NUMERIC)) as gpSales,
+          SUM(CAST(COALESCE(data->>'invoices', '0') AS INTEGER)) as invoices,
+          COUNT(*) as advisor_count
+        FROM performance_data 
+        WHERE upload_date = $1 
+        AND store_id = $2 
+        AND advisor_user_id IS NOT NULL
+      `, [reportDate, store.store_id]);
+      
+      const aggregated = aggregatedData.rows[0];
+      
+      // Calculate percentages
+      const tireProtectionPercent = aggregated.retailtires > 0 ? 
+        Math.ceil((aggregated.tireprotection / aggregated.retailtires) * 100) : 0;
+      
+      const brakeFlushToServicePercent = aggregated.brakeservice > 0 ? 
+        Math.ceil((aggregated.brakeflush / aggregated.brakeservice) * 100) : 0;
+      
+      const potentialAlignmentsPercent = aggregated.potentialalignments > 0 ? 
+        Math.ceil((aggregated.potentialalignmentssold / aggregated.potentialalignments) * 100) : 0;
+      
+      const gpPercent = aggregated.sales > 0 ? 
+        ((aggregated.gpsales / aggregated.sales) * 100).toFixed(2) : 0;
+      
+      const avgSpend = aggregated.invoices > 0 ? 
+        (aggregated.sales / aggregated.invoices).toFixed(2) : 0;
+      
+      // Create store-level aggregated record
+      const storeData = {
+        storeName: store.store_name,
+        market: store.market_name,
+        allTires: aggregated.alltires,
+        retailTires: aggregated.retailtires,
+        tireProtection: aggregated.tireprotection,
+        tireProtectionPercent: tireProtectionPercent,
+        acService: aggregated.acservice,
+        wiperBlades: aggregated.wiperblades,
+        brakeService: aggregated.brakeservice,
+        brakeFlush: aggregated.brakeflush,
+        brakeFlushToServicePercent: brakeFlushToServicePercent,
+        alignmentCheck: aggregated.alignmentcheck,
+        alignmentService: aggregated.alignmentservice,
+        potentialAlignments: aggregated.potentialalignments,
+        potentialAlignmentsSold: aggregated.potentialalignmentssold,
+        potentialAlignmentsPercent: potentialAlignmentsPercent,
+        shocksStruts: aggregated.shocksstruts,
+        sales: parseFloat(aggregated.sales),
+        gpSales: parseFloat(aggregated.gpsales),
+        gpPercent: parseFloat(gpPercent),
+        avgSpend: parseFloat(avgSpend),
+        invoices: aggregated.invoices,
+        advisorCount: parseInt(aggregated.advisor_count)
+      };
+      
+      // Check if store-level record already exists for this date
+      const existingRecord = await client.query(`
+        SELECT id FROM performance_data 
+        WHERE upload_date = $1 AND store_id = $2 AND advisor_user_id IS NULL
+      `, [reportDate, store.store_id]);
+      
+      if (existingRecord.rows.length === 0) {
+        // Insert the store-level record
+        await client.query(`
+          INSERT INTO performance_data 
+          (upload_date, data_type, market_id, store_id, advisor_user_id, data)
+          VALUES ($1, 'services', $2, $3, NULL, $4)
+        `, [
+          reportDate,
+          store.market_id,
+          store.store_id,
+          JSON.stringify(storeData)
+        ]);
+        
+        console.log(`   ✅ Generated store record for ${store.store_name}: ${aggregated.alltires} tires, ${aggregated.advisor_count} advisors`);
+        generatedCount++;
+      } else {
+        console.log(`   ⏭️  Store record already exists for ${store.store_name}`);
+      }
+    }
+    
+    return generatedCount;
   }
 
   /**
