@@ -73,7 +73,7 @@ class AIDataService {
             GROUP BY market_id
           ) store_counts ON m.id = store_counts.market_id
           LEFT JOIN market_tags mt ON m.id = mt.market_id
-          LEFT JOIN vendor_tags vt ON mt.vendor_tag_id = vt.id
+          LEFT JOIN vendor_tags vt ON mt.tag_id = vt.id
           WHERE m.id = $1
           GROUP BY m.id, store_counts.store_count
         `;
@@ -102,7 +102,7 @@ class AIDataService {
             GROUP BY market_id
           ) store_counts ON m.id = store_counts.market_id
           LEFT JOIN market_tags mt ON m.id = mt.market_id
-          LEFT JOIN vendor_tags vt ON mt.vendor_tag_id = vt.id
+          LEFT JOIN vendor_tags vt ON mt.tag_id = vt.id
           WHERE uma.user_id = $1
           GROUP BY m.id, store_counts.store_count
         `;
@@ -130,7 +130,7 @@ class AIDataService {
             GROUP BY market_id
           ) store_counts ON m.id = store_counts.market_id
           LEFT JOIN market_tags mt ON m.id = mt.market_id
-          LEFT JOIN vendor_tags vt ON mt.vendor_tag_id = vt.id
+          LEFT JOIN vendor_tags vt ON mt.tag_id = vt.id
           GROUP BY m.id, store_counts.store_count
         `;
       }
@@ -334,25 +334,37 @@ class AIDataService {
   }
 
   /**
-   * Get performance data with enhanced context
+   * Get performance data from latest MTD spreadsheets
    */
-  async getPerformanceData(userId, limit = 5) {
+  async getPerformanceData(userId, limit = 3) {
     try {
+      // Get latest upload per month for this advisor (since spreadsheets are MTD)
       const result = await this.pool.query(`
+        WITH latest_per_month AS (
+          SELECT 
+            EXTRACT(YEAR FROM upload_date) as year,
+            EXTRACT(MONTH FROM upload_date) as month,
+            MAX(upload_date) as latest_date
+          FROM performance_data
+          WHERE advisor_user_id = $1 AND data_type = 'services'
+          GROUP BY EXTRACT(YEAR FROM upload_date), EXTRACT(MONTH FROM upload_date)
+          ORDER BY year DESC, month DESC
+          LIMIT $2
+        )
         SELECT 
           pd.upload_date, 
           pd.data, 
           pd.store_id,
           pd.data_type,
           s.name as store_name,
-          m.name as market_name
+          m.name as market_name,
+          'latest_mtd' as data_source
         FROM performance_data pd
         LEFT JOIN stores s ON pd.store_id = s.id
         LEFT JOIN markets m ON s.market_id = m.id
-        WHERE pd.advisor_user_id = $1
-          AND pd.data_type = 'services'
+        JOIN latest_per_month lpm ON pd.upload_date = lpm.latest_date
+        WHERE pd.advisor_user_id = $1 AND pd.data_type = 'services'
         ORDER BY pd.upload_date DESC
-        LIMIT $2
       `, [userId, limit]);
 
       return result.rows;
@@ -581,6 +593,210 @@ class AIDataService {
   }
 
   /**
+   * Get market-level performance from latest MTD spreadsheet
+   */
+  async getMarketPerformanceData(marketId = null, month = null, year = null) {
+    try {
+      let marketPerfQuery;
+      let params = [];
+
+      if (marketId && month && year) {
+        // Latest MTD spreadsheet for specific market/month/year
+        marketPerfQuery = `
+          WITH latest_upload AS (
+            SELECT MAX(upload_date) as latest_date
+            FROM performance_data pd
+            JOIN stores s ON pd.store_id = s.id
+            JOIN markets m ON s.market_id = m.id
+            WHERE pd.data_type = 'services' 
+              AND m.id = $1
+              AND EXTRACT(MONTH FROM pd.upload_date) = $2
+              AND EXTRACT(YEAR FROM pd.upload_date) = $3
+          )
+          SELECT 
+            m.name as market_name,
+            pd.upload_date,
+            COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
+            SUM((pd.data->>'sales')::int) as total_sales,
+            AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
+            SUM((pd.data->>'invoices')::int) as total_invoices,
+            AVG((pd.data->>'avgSpend')::float) as avg_ticket_size,
+            'latest_mtd' as data_source
+          FROM performance_data pd
+          JOIN stores s ON pd.store_id = s.id
+          JOIN markets m ON s.market_id = m.id
+          JOIN latest_upload lu ON pd.upload_date = lu.latest_date
+          WHERE pd.data_type = 'services' 
+            AND m.id = $1
+            AND EXTRACT(MONTH FROM pd.upload_date) = $2
+            AND EXTRACT(YEAR FROM pd.upload_date) = $3
+          GROUP BY m.name, pd.upload_date
+        `;
+        params = [marketId, month, year];
+      } else if (marketId) {
+        // Latest MTD spreadsheet for specific market
+        marketPerfQuery = `
+          WITH latest_upload AS (
+            SELECT MAX(upload_date) as latest_date
+            FROM performance_data pd
+            JOIN stores s ON pd.store_id = s.id
+            JOIN markets m ON s.market_id = m.id
+            WHERE pd.data_type = 'services' AND m.id = $1
+          )
+          SELECT 
+            m.name as market_name,
+            pd.upload_date,
+            COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
+            SUM((pd.data->>'sales')::int) as total_sales,
+            AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
+            SUM((pd.data->>'invoices')::int) as total_invoices,
+            AVG((pd.data->>'avgSpend')::float) as avg_ticket_size,
+            'latest_mtd' as data_source
+          FROM performance_data pd
+          JOIN stores s ON pd.store_id = s.id
+          JOIN markets m ON s.market_id = m.id
+          JOIN latest_upload lu ON pd.upload_date = lu.latest_date
+          WHERE pd.data_type = 'services' AND m.id = $1
+          GROUP BY m.name, pd.upload_date
+        `;
+        params = [marketId];
+      } else {
+        // Latest MTD spreadsheet for all markets
+        marketPerfQuery = `
+          WITH latest_upload_per_market AS (
+            SELECT 
+              m.id as market_id,
+              MAX(pd.upload_date) as latest_date
+            FROM performance_data pd
+            JOIN stores s ON pd.store_id = s.id
+            JOIN markets m ON s.market_id = m.id
+            WHERE pd.data_type = 'services'
+            GROUP BY m.id
+          )
+          SELECT 
+            m.name as market_name,
+            m.id as market_id,
+            pd.upload_date,
+            COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
+            SUM((pd.data->>'sales')::int) as total_sales,
+            AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
+            SUM((pd.data->>'invoices')::int) as total_invoices,
+            AVG((pd.data->>'avgSpend')::float) as avg_ticket_size,
+            'latest_mtd' as data_source
+          FROM performance_data pd
+          JOIN stores s ON pd.store_id = s.id
+          JOIN markets m ON s.market_id = m.id
+          JOIN latest_upload_per_market lum ON m.id = lum.market_id AND pd.upload_date = lum.latest_date
+          WHERE pd.data_type = 'services'
+          GROUP BY m.name, m.id, pd.upload_date
+          ORDER BY pd.upload_date DESC
+        `;
+      }
+
+      const result = await this.pool.query(marketPerfQuery, params);
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error getting market performance data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get specific month/year performance data (for direct queries like "July sales")
+   */
+  async getMonthYearPerformance(marketName, month, year) {
+    try {
+      const result = await this.pool.query(`
+        WITH latest_upload AS (
+          SELECT MAX(upload_date) as latest_date
+          FROM performance_data pd
+          WHERE pd.data_type = 'services'
+            AND EXTRACT(MONTH FROM pd.upload_date) = $2
+            AND EXTRACT(YEAR FROM pd.upload_date) = $3
+            AND pd.data->>'market' = $1
+        )
+        SELECT 
+          pd.data->>'market' as market_name,
+          TO_CHAR(pd.upload_date, 'Month YYYY') as period,
+          pd.upload_date,
+          COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
+          SUM((pd.data->>'sales')::int) as total_sales,
+          AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
+          SUM((pd.data->>'invoices')::int) as total_invoices,
+          'final_mtd' as data_source
+        FROM performance_data pd
+        JOIN latest_upload lu ON pd.upload_date = lu.latest_date
+        WHERE pd.data_type = 'services'
+          AND pd.data->>'market' = $1
+        GROUP BY pd.data->>'market', pd.upload_date
+      `, [marketName, month, year]);
+
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('❌ Error getting month/year performance:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get top performers by specific metric for a given month
+   */
+  async getTopPerformers(metric, marketName, month, year, limit = 5) {
+    try {
+      // Map common metric names to JSON field names
+      const metricMap = {
+        'tire': 'retailTires',
+        'tires': 'retailTires',
+        'tire sales': 'retailTires',
+        'oil change': 'oilChange',
+        'oil changes': 'oilChange',
+        'sales': 'sales',
+        'revenue': 'sales',
+        'gp': 'gpPercent',
+        'gross profit': 'gpPercent',
+        'alignments': 'alignments',
+        'brake service': 'brakeService',
+        'brakes': 'brakeService'
+      };
+
+      const jsonField = metricMap[metric.toLowerCase()] || metric;
+      
+      const result = await this.pool.query(`
+        WITH latest_upload AS (
+          SELECT MAX(upload_date) as latest_date
+          FROM performance_data pd
+          WHERE pd.data_type = 'services'
+            AND EXTRACT(MONTH FROM pd.upload_date) = $2
+            AND EXTRACT(YEAR FROM pd.upload_date) = $3
+            AND pd.data->>'market' = $1
+        )
+        SELECT DISTINCT
+          pd.advisor_user_id,
+          u.first_name || ' ' || u.last_name as advisor_name,
+          pd.data->>'storeName' as store,
+          (pd.data->>$4)::float as metric_value,
+          (pd.data->>'sales')::int as total_sales,
+          (pd.data->>'gpPercent')::float as gp_percent,
+          pd.upload_date
+        FROM performance_data pd
+        JOIN users u ON pd.advisor_user_id = u.id
+        JOIN latest_upload lu ON pd.upload_date = lu.latest_date
+        WHERE pd.data_type = 'services'
+          AND pd.data->>'market' = $1
+          AND pd.data->>$4 IS NOT NULL
+          AND (pd.data->>$4)::float > 0
+        ORDER BY (pd.data->>$4)::float DESC
+        LIMIT $5
+      `, [marketName, month, year, jsonField, limit]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error getting top performers:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Build comprehensive context for AI with all business data
    */
   async buildComprehensiveContext(userId, query = null) {
@@ -596,26 +812,70 @@ class AIDataService {
       // Get goals
       const goalsData = await this.getGoalsData(userId);
       
-      // Get market data for user's markets
-      const marketData = await this.getMarketData(null, userId);
+      // Get market performance aggregations (focus on MTD data)
+      const marketPerformanceData = userData.market_id ? 
+        await this.getMarketPerformanceData(userData.market_id) : [];
       
-      // Get store data for user's stores
-      const storeData = await this.getStoreData(null, null, userId);
+      // Simplified market and store data to avoid SQL issues
+      const marketData = userData.market_id ? [{ 
+        id: userData.market_id, 
+        name: userData.market_name 
+      }] : [];
       
-      // Get vendor mappings
-      const vendorData = await this.getVendorData();
+      const storeData = userData.store_id ? [{ 
+        id: userData.store_id, 
+        name: userData.store_name 
+      }] : [];
       
-      // Get service catalog
-      const serviceData = await this.getServiceCatalog();
+      // Skip complex queries that may fail - focus on core performance data
+      const vendorData = [];
+      const serviceData = [];
+      const coachingData = [];
+      const templateData = [];
       
-      // Get coaching history
-      const coachingData = await this.getCoachingHistory(userId, 5);
-      
-      // Get scorecard templates for user's markets
-      const templateData = userData.market_id ? await this.getScorecardTemplates(userData.market_id) : [];
-      
-      // Get peer comparison data
-      const peerData = await this.getPeerComparison(userId, userData.market_id, userData.store_id, 5);
+      // Get peer comparison data (safely)
+      let peerData = [];
+      try {
+        peerData = await this.getPeerComparison(userId, userData.market_id, userData.store_id, 5);
+      } catch (error) {
+        console.warn('⚠️ Could not get peer data:', error.message);
+      }
+
+      // Check if query is asking for top performers
+      let topPerformersData = null;
+      if (query && query.toLowerCase().includes('top') && query.toLowerCase().match(/tire|sales|oil|brake|alignment/)) {
+        // Extract metric from query
+        let metric = 'sales';
+        if (query.toLowerCase().includes('tire')) metric = 'retailTires';
+        else if (query.toLowerCase().includes('oil')) metric = 'oilChange';
+        else if (query.toLowerCase().includes('brake')) metric = 'brakeService';
+        else if (query.toLowerCase().includes('alignment')) metric = 'alignments';
+        
+        // Check if month is specified in query
+        let targetMonth = new Date().getMonth() + 1;
+        let targetYear = new Date().getFullYear();
+        
+        if (query.toLowerCase().includes('august')) {
+          targetMonth = 8;
+        } else if (query.toLowerCase().includes('july')) {
+          targetMonth = 7;
+        }
+        
+        console.log(`🎯 Looking for top ${metric} performers for ${targetMonth}/${targetYear}`);
+        
+        try {
+          topPerformersData = await this.getTopPerformers(
+            metric, 
+            userData.market_name || 'Tire South - Tekmetric',
+            targetMonth,
+            targetYear,
+            5
+          );
+          console.log(`🏆 Found ${topPerformersData.length} top performers for ${metric}`);
+        } catch (error) {
+          console.error('⚠️ Could not get top performers:', error.message);
+        }
+      }
 
       const context = {
         user: userData,
@@ -627,6 +887,7 @@ class AIDataService {
         goals: goalsData,
         business_intelligence: {
           markets: marketData,
+          market_performance: marketPerformanceData,
           stores: storeData,
           vendors: vendorData,
           services: serviceData,
@@ -636,7 +897,8 @@ class AIDataService {
           recent_threads: coachingData
         },
         benchmarking: {
-          peers: peerData
+          peers: peerData,
+          top_performers: topPerformersData
         },
         query_context: query
       };

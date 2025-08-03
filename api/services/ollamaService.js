@@ -227,11 +227,31 @@ class OllamaService {
       const userData = userResult.rows[0] || {};
       userData.name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User';
 
+      // Get latest MTD data per month
       const performanceResult = await this.pool.query(`
-        SELECT upload_date, data, store_id
-        FROM performance_data
-        WHERE advisor_user_id = $1 AND data_type = 'services'
-        ORDER BY upload_date DESC LIMIT 3
+        WITH latest_per_month AS (
+          SELECT 
+            EXTRACT(YEAR FROM upload_date) as year,
+            EXTRACT(MONTH FROM upload_date) as month,
+            MAX(upload_date) as latest_date
+          FROM performance_data
+          WHERE advisor_user_id = $1 AND data_type = 'services'
+          GROUP BY EXTRACT(YEAR FROM upload_date), EXTRACT(MONTH FROM upload_date)
+          ORDER BY year DESC, month DESC
+          LIMIT 3
+        )
+        SELECT 
+          pd.upload_date, 
+          pd.data, 
+          pd.store_id,
+          s.name as store_name,
+          m.name as market_name
+        FROM performance_data pd
+        LEFT JOIN stores s ON pd.store_id = s.id
+        LEFT JOIN markets m ON s.market_id = m.id
+        JOIN latest_per_month lpm ON pd.upload_date = lpm.latest_date
+        WHERE pd.advisor_user_id = $1 AND pd.data_type = 'services'
+        ORDER BY pd.upload_date DESC
       `, [userId]);
 
       const goalsResult = await this.pool.query(`
@@ -346,6 +366,17 @@ ${goalsSection}`;
           });
         }
 
+        if (bi.market_performance && bi.market_performance.length > 0) {
+          contextInfo += `
+
+**MARKET PERFORMANCE DATA (Latest MTD Spreadsheet):**`;
+          bi.market_performance.slice(0, 3).forEach(perf => {
+            const uploadMonth = new Date(perf.upload_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+            contextInfo += `
+- ${perf.market_name} - ${uploadMonth} MTD: $${perf.total_sales?.toLocaleString() || 'N/A'} total sales, ${perf.advisor_count} advisors, ${perf.avg_gp_percent?.toFixed(1) || 'N/A'}% avg GP`;
+          });
+        }
+
         if (bi.stores && bi.stores.length > 0) {
           contextInfo += `
 
@@ -401,6 +432,17 @@ ${goalsSection}`;
 - ${context.benchmarking.peers.length} peer advisors for benchmarking`;
       }
 
+      // Add top performers if available
+      if (context.benchmarking?.top_performers && context.benchmarking.top_performers.length > 0) {
+        contextInfo += `
+
+**TOP PERFORMERS (Latest MTD):**`;
+        context.benchmarking.top_performers.forEach((performer, index) => {
+          contextInfo += `
+${index + 1}. ${performer.advisor_name} (${performer.store}): ${performer.metric_value} units - $${performer.total_sales?.toLocaleString() || 'N/A'} total sales`;
+        });
+      }
+
       // Add coaching context
       if (context.coaching?.recent_threads && context.coaching.recent_threads.length > 0) {
         contextInfo += `
@@ -417,7 +459,11 @@ ${contextInfo}
 
 **USER QUERY:** ${query}
 
-Provide detailed, data-driven insights based on all available information. Reference specific metrics, compare to goals, and provide actionable recommendations. If asked about markets, stores, vendors, or peers, use the business intelligence data provided.`;
+IMPORTANT: All performance data comes from the latest MTD (month-to-date) spreadsheet for each time period. When asked about monthly sales/performance, use the final MTD totals from the last upload of that month. For example:
+- "July 2025 sales" = final MTD totals from last July upload  
+- "August 2025 sales" = current MTD totals from last August upload
+
+Provide detailed, data-driven insights based on all available information. Reference specific metrics, compare to goals, and provide actionable recommendations.`;
 
       return enhancedTemplate;
 
