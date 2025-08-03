@@ -1,8 +1,11 @@
 const XLSX = require('xlsx');
 
 class ExcelParser {
-  constructor() {
-    // Services file columns for advisor rollup
+  constructor(fieldMappings = null, pool = null) {
+    this.fieldMappings = fieldMappings;
+    this.pool = pool;
+    
+    // Fallback to default service columns if no mappings provided
     this.serviceColumns = [
       'ID', 'Market', 'Store', 'Employee', 'Sales', 'GP Sales', 'GP Percent',
       'Avg. Spend', 'Invoices', 'All Tires', 'Retail Tires', 'Tire Protection',
@@ -23,6 +26,69 @@ class ExcelParser {
       'Tire Units', 'Parts', 'Parts GP $', 'Parts GP %',
       'Supplies', 'Discounts', 'Average RO'
     ];
+  }
+
+  // Load field mappings for a specific market
+  async loadFieldMappings(marketId = null) {
+    if (!this.pool) {
+      console.warn('No database pool provided, using default mappings');
+      return;
+    }
+
+    try {
+      let query = `
+        SELECT spreadsheet_header, scorecard_field_key, field_type, 
+               data_field_name, display_label, is_percentage, is_active
+        FROM default_field_mappings 
+        WHERE is_active = true
+      `;
+      
+      const params = [];
+      
+      // If marketId provided, also get market-specific overrides
+      if (marketId) {
+        query = `
+          WITH combined_mappings AS (
+            -- Default mappings
+            SELECT spreadsheet_header, scorecard_field_key, field_type, 
+                   data_field_name, display_label, is_percentage, is_active,
+                   0 as priority
+            FROM default_field_mappings 
+            WHERE is_active = true
+            
+            UNION ALL
+            
+            -- Market-specific overrides (higher priority)
+            SELECT spreadsheet_header, scorecard_field_key, field_type, 
+                   data_field_name, display_label, is_percentage, is_active,
+                   1 as priority
+            FROM service_field_mappings 
+            WHERE market_id = $1 AND is_active = true
+          ),
+          ranked_mappings AS (
+            SELECT *, 
+                   ROW_NUMBER() OVER (
+                     PARTITION BY spreadsheet_header 
+                     ORDER BY priority DESC
+                   ) as rn
+            FROM combined_mappings
+          )
+          SELECT spreadsheet_header, scorecard_field_key, field_type, 
+                 data_field_name, display_label, is_percentage, is_active
+          FROM ranked_mappings 
+          WHERE rn = 1
+        `;
+        params.push(marketId);
+      }
+
+      const result = await this.pool.query(query, params);
+      this.fieldMappings = result.rows;
+      
+      console.log(`📋 Loaded ${this.fieldMappings.length} field mappings${marketId ? ` for market ${marketId}` : ' (defaults)'}`);
+    } catch (error) {
+      console.error('❌ Failed to load field mappings:', error);
+      this.fieldMappings = null;
+    }
   }
 
   parseServicesFile(filePath) {
@@ -250,15 +316,123 @@ class ExcelParser {
 
   // Helper methods
   getCellValue(row, headers, columnName) {
-    // First try exact match (case-insensitive)
+    // If we have field mappings, use them to find the actual header name
+    if (this.fieldMappings) {
+      const mapping = this.fieldMappings.find(m => 
+        m.data_field_name === columnName || 
+        m.scorecard_field_key === columnName
+      );
+      
+      if (mapping) {
+        const headerName = mapping.spreadsheet_header;
+        let index = headers.findIndex(h => h && h.toString().toLowerCase().trim() === headerName.toLowerCase().trim());
+        
+        if (index < 0) {
+          index = headers.findIndex(h => h && h.toString().toLowerCase().includes(headerName.toLowerCase()));
+        }
+        
+        if (index >= 0) {
+          const value = row[index];
+          // Apply percentage conversion if needed
+          if (mapping.is_percentage && mapping.field_type === 'percentage') {
+            return this.parsePercent(value);
+          }
+          return value;
+        }
+      }
+    }
+    
+    // Fallback to original logic for backward compatibility
     let index = headers.findIndex(h => h && h.toString().toLowerCase().trim() === columnName.toLowerCase().trim());
     
-    // If no exact match, fall back to includes() for backward compatibility
     if (index < 0) {
       index = headers.findIndex(h => h && h.toString().toLowerCase().includes(columnName.toLowerCase()));
     }
     
     return index >= 0 ? row[index] : null;
+  }
+
+  // Apply field mappings to transform parsed data for scorecard compatibility
+  applyFieldMappings(parsedData) {
+    if (!this.fieldMappings || !parsedData) {
+      return parsedData;
+    }
+
+    const transformedData = { ...parsedData };
+
+    // Apply direct mappings
+    this.fieldMappings
+      .filter(mapping => mapping.field_type === 'direct')
+      .forEach(mapping => {
+        const sourceKey = mapping.data_field_name;
+        const targetKey = mapping.scorecard_field_key;
+        
+        if (parsedData.hasOwnProperty(sourceKey)) {
+          transformedData[targetKey] = parsedData[sourceKey];
+          // Remove the source key if it's different from target
+          if (sourceKey !== targetKey) {
+            delete transformedData[sourceKey];
+          }
+        }
+      });
+
+    // Apply nested mappings (for otherServices)
+    const nestedMappings = this.fieldMappings.filter(mapping => mapping.field_type === 'nested');
+    if (nestedMappings.length > 0) {
+      if (!transformedData.otherServices) {
+        transformedData.otherServices = {};
+      }
+      
+      nestedMappings.forEach(mapping => {
+        const sourceKey = mapping.data_field_name;
+        const targetKey = mapping.scorecard_field_key;
+        
+        if (parsedData.hasOwnProperty(sourceKey)) {
+          transformedData.otherServices[targetKey] = parsedData[sourceKey];
+          delete transformedData[sourceKey];
+        }
+      });
+    }
+
+    // Apply calculated mappings (these might need special processing)
+    const calculatedMappings = this.fieldMappings.filter(mapping => mapping.field_type === 'calculated');
+    calculatedMappings.forEach(mapping => {
+      // For calculated fields, we might need custom logic based on the field
+      // This is a placeholder for future calculated field implementations
+      console.log(`📊 Calculated field mapping: ${mapping.scorecard_field_key}`);
+    });
+
+    return transformedData;
+  }
+
+  // Discover headers from spreadsheet for mapping UI
+  discoverHeaders(headers, sampleRows = []) {
+    const discovered = [];
+    
+    headers.forEach((header, index) => {
+      if (header && header.toString().trim()) {
+        const sampleValues = sampleRows
+          .slice(0, 5)
+          .map(row => row[index])
+          .filter(val => val !== null && val !== undefined && val !== '')
+          .map(val => val.toString().trim());
+
+        // Check if this header is already mapped
+        const isMapped = this.fieldMappings ? 
+          this.fieldMappings.some(m => 
+            m.spreadsheet_header.toLowerCase() === header.toString().toLowerCase().trim()
+          ) : false;
+
+        discovered.push({
+          header_name: header.toString().trim(),
+          column_position: index,
+          sample_values: sampleValues,
+          is_mapped: isMapped
+        });
+      }
+    });
+
+    return discovered;
   }
 
   parseNumber(value) {

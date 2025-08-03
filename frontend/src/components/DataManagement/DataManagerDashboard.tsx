@@ -27,6 +27,7 @@ import DataVerificationViewer from './DataVerificationViewer';
 import DataAuditViewer from './DataAuditViewer';
 import DataLevelBreakdown from './DataLevelBreakdown';
 import EntityConfirmation from './EntityConfirmation';
+import ServiceFieldMappingManager from '../ServiceFieldMappingManager';
 
 interface UploadSession {
   id: string;
@@ -50,7 +51,7 @@ interface DataStats {
 
 const DataManagerDashboard: React.FC = () => {
   const { token } = useAuth();
-  const [activeView, setActiveView] = useState<'upload' | 'history' | 'mappings' | 'monitoring' | 'troubleshoot' | 'schema' | 'verification' | 'audit' | 'breakdown'>('upload');
+  const [activeView, setActiveView] = useState<'upload' | 'history' | 'mappings' | 'field-mappings' | 'monitoring' | 'troubleshoot' | 'schema' | 'verification' | 'audit' | 'breakdown'>('upload');
   const [pendingSessions, setPendingSessions] = useState<UploadSession[]>([]);
   const [dataStats, setDataStats] = useState<DataStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -256,6 +257,8 @@ const DataManagerDashboard: React.FC = () => {
         return <UploadHistory />;
       case 'mappings':
         return <DataMappingManager onMappingUpdate={loadDashboardData} />;
+      case 'field-mappings':
+        return <ServiceFieldMappingManager />;
       case 'monitoring':
         return <UploadMonitoring />;
       case 'troubleshoot':
@@ -364,6 +367,7 @@ const DataManagerDashboard: React.FC = () => {
             { id: 'breakdown', label: 'Data Breakdown', icon: BuildingStorefrontIcon },
             { id: 'history', label: 'Upload History', icon: FolderOpenIcon },
             { id: 'mappings', label: 'Advisor Mappings', icon: UserGroupIcon },
+            { id: 'field-mappings', label: 'Field Mappings', icon: ArrowPathIcon },
             { id: 'audit', label: 'Data Audit', icon: ShieldCheckIcon },
             { id: 'verification', label: 'Data Verification', icon: CheckCircleIcon },
             { id: 'monitoring', label: 'Monitoring', icon: ChartBarIcon },
