@@ -1526,17 +1526,37 @@ router.get('/markets', async (req, res) => {
       
       // Also include any fields from otherServices that might have been missed
       if (aggregatedOtherServices) {
-        // Add Shocks & Struts if it's in otherServices
-        if (aggregatedOtherServices['Shocks & Struts'] !== undefined && !services['Shocks & Struts']) {
-          services['Shocks & Struts'] = aggregatedOtherServices['Shocks & Struts'];
-        }
-        // Add percentage fields from otherServices
-        if (aggregatedOtherServices['Brake Flush to Service %'] !== undefined) {
-          services['Brake Flush to Service %'] = aggregatedOtherServices['Brake Flush to Service %'];
-        }
-        if (aggregatedOtherServices['Tire Protection %'] !== undefined) {
-          services['Tire Protection %'] = aggregatedOtherServices['Tire Protection %'];
-        }
+        // Add all otherServices fields that aren't already in services
+        const otherServiceMappings = {
+          'Shocks & Struts': 'Shocks & Struts',
+          'Tire Balance': 'Tire Balance',
+          'Tire Rotation': 'Tire Rotation',
+          'Spark Plug Replacement': 'Spark Plug Replacement',
+          'Premium Alignments': 'Premium Alignments',
+          'Belts Replacement': 'Belts Replacement',
+          'Battery Service': 'Battery Service',
+          'TPMS': 'TPMS',
+          'Nitrogen': 'Nitrogen',
+          'Fuel Filter': 'Fuel Filter',
+          'Timing Belt': 'Timing Belt',
+          'Hose Replacement': 'Hose Replacement',
+          'Synthetic Oil Change': 'Synthetic Oil Change',
+          'Transfer Case Service': 'Transfer Case Service',
+          'Climate Control Service': 'Climate Control Service',
+          'Engine Performance Service': 'Engine Performance Service',
+          'Synthetic Blend Oil Change': 'Synthetic Blend Oil Change',
+          'Complete Vehicle Inspection': 'Complete Vehicle Inspection',
+          'Headlight Restoration Service': 'Headlight Restoration Service',
+          'Brake Flush to Service %': 'Brake Flush to Service %',
+          'Tire Protection %': 'Tire Protection %'
+        };
+        
+        // Add each otherService field if it exists and isn't already in services
+        Object.entries(otherServiceMappings).forEach(([sourceKey, targetKey]) => {
+          if (aggregatedOtherServices[sourceKey] !== undefined && !services[targetKey]) {
+            services[targetKey] = aggregatedOtherServices[sourceKey];
+          }
+        });
       }
       
       // Get goals for this market (if any)
