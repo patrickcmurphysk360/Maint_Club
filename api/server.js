@@ -29,6 +29,9 @@ const storesRoutes = require('./routes/stores');
 const dataManagementRoutes = require('./routes/data-management');
 const dataAuditRoutes = require('./routes/data-audit');
 const fieldMappingsRoutes = require('./routes/field-mappings');
+const aiInsightsRoutes = require('./routes/ai-insights');
+const aiConfigRoutes = require('./routes/ai-config');
+const aiSettingsRoutes = require('./routes/ai-settings');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -114,6 +117,9 @@ app.use('/api/stores', authenticateToken, storesRoutes);
 app.use('/api/data-management', authenticateToken, dataManagementRoutes);
 app.use('/api/data-audit', authenticateToken, dataAuditRoutes);
 app.use('/api/field-mappings', authenticateToken, fieldMappingsRoutes);
+app.use('/api/ai-insights', authenticateToken, aiInsightsRoutes);
+app.use('/api/ai-config', authenticateToken, aiConfigRoutes);
+app.use('/api/ai-settings', authenticateToken, aiSettingsRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

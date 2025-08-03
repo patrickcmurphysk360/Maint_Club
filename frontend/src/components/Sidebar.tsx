@@ -94,6 +94,12 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
       icon: Cog6ToothIcon,
       roles: ['administrator'],
     },
+    {
+      id: 'ai-settings',
+      label: 'AI Settings',
+      icon: Cog6ToothIcon,
+      roles: ['administrator'],
+    },
   ];
 
   const isItemVisible = (item: NavigationItem) => {

@@ -319,4 +319,95 @@ export const exportAPI = {
   }
 };
 
+// AI Insights API
+export const aiInsightsAPI = {
+  getHealth: async () => {
+    const response = await api.get('/ai-insights/health');
+    return response.data;
+  },
+
+  chat: async (query: string, userId?: number, model?: string) => {
+    const response = await api.post('/ai-insights/chat', {
+      query,
+      userId,
+      model
+    });
+    return response.data;
+  },
+
+  getAdvisorInsights: async (userId: number, type: string = 'general', model?: string) => {
+    const params = new URLSearchParams();
+    params.append('type', type);
+    if (model) params.append('model', model);
+    
+    const response = await api.get(`/ai-insights/insights/advisor/${userId}?${params}`);
+    return response.data;
+  },
+
+  getStoreInsights: async (storeId: number, model?: string) => {
+    const params = new URLSearchParams();
+    if (model) params.append('model', model);
+    
+    const response = await api.get(`/ai-insights/insights/store/${storeId}?${params}`);
+    return response.data;
+  },
+
+  getModels: async () => {
+    const response = await api.get('/ai-insights/models');
+    return response.data;
+  }
+};
+
+// AI Settings API
+export const aiSettingsAPI = {
+  getConfig: async () => {
+    const response = await api.get('/ai-settings/config');
+    return response.data;
+  },
+
+  updateSystemPrompts: async (prompts: any) => {
+    const response = await api.put('/ai-settings/prompts/system', prompts);
+    return response.data;
+  },
+
+  updateAgentConfig: async (config: any) => {
+    const response = await api.put('/ai-settings/config/agent', config);
+    return response.data;
+  },
+
+  getCoachingTips: async (category?: string, active?: boolean) => {
+    const params = new URLSearchParams();
+    if (category) params.append('category', category);
+    if (active !== undefined) params.append('active', active.toString());
+    
+    const response = await api.get(`/ai-settings/coaching-tips?${params}`);
+    return response.data;
+  },
+
+  createCoachingTip: async (tip: any) => {
+    const response = await api.post('/ai-settings/coaching-tips', tip);
+    return response.data;
+  },
+
+  updateCoachingTip: async (id: number, tip: any) => {
+    const response = await api.put(`/ai-settings/coaching-tips/${id}`, tip);
+    return response.data;
+  },
+
+  deleteCoachingTip: async (id: number) => {
+    const response = await api.delete(`/ai-settings/coaching-tips/${id}`);
+    return response.data;
+  },
+
+  testPrompt: async (testData: any) => {
+    const response = await api.post('/ai-settings/test-prompt', testData);
+    return response.data;
+  },
+
+  getModels: async () => {
+    const response = await api.get('/ai-settings/models');
+    return response.data;
+  }
+};
+
 export default api;

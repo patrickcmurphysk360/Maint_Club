@@ -17,6 +17,8 @@ import ScorecardTemplateManager from '../components/Scorecard/ScorecardTemplateM
 import UploadConfirmation from '../components/UploadConfirmation';
 import Sidebar from '../components/Sidebar';
 import DataManagerDashboard from '../components/DataManagement/DataManagerDashboard';
+import AIInsightsChat from '../components/AIInsightsChat';
+import AISettings from '../components/AISettings';
 
 const Dashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -28,6 +30,7 @@ const Dashboard: React.FC = () => {
   const [confirmationLoading, setConfirmationLoading] = useState(false);
   const [selectedAdvisorForMessaging, setSelectedAdvisorForMessaging] = useState<any>(null);
   const [showMessaging, setShowMessaging] = useState(false);
+  const [showAIChat, setShowAIChat] = useState(false);
   
 
   useEffect(() => {
@@ -210,6 +213,9 @@ const Dashboard: React.FC = () => {
       case 'scorecard-templates':
         return <ScorecardTemplateManager />;
       
+      case 'ai-settings':
+        return <AISettings />;
+      
       case 'coaching':
         return (
           <div className="space-y-6">
@@ -348,6 +354,12 @@ const Dashboard: React.FC = () => {
               </h2>
               
               <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setShowAIChat(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
+                >
+                  🤖 AI Insights
+                </button>
                 <span className="text-sm text-gray-600">
                   {user?.permissions?.canViewScorecard && '📊'}
                   {user?.permissions?.canSetGoals && '🎯'}
@@ -502,6 +514,13 @@ const Dashboard: React.FC = () => {
           loading={confirmationLoading}
         />
       )}
+
+      {/* AI Insights Chat Modal */}
+      <AIInsightsChat
+        userId={user?.id}
+        isOpen={showAIChat}
+        onClose={() => setShowAIChat(false)}
+      />
     </div>
   );
 };

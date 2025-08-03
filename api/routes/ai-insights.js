@@ -1,0 +1,413 @@
+const express = require('express');
+const OllamaService = require('../services/ollamaService');
+
+const router = express.Router();
+
+// Debug endpoint (no auth required)
+router.get('/debug', async (req, res) => {
+  try {
+    const ollama = new OllamaService();
+    const isAvailable = await ollama.isAvailable();
+    const models = isAvailable ? await ollama.getAvailableModels() : [];
+    
+    res.json({
+      status: isAvailable ? 'healthy' : 'unavailable',
+      ollama_available: isAvailable,
+      models: models.map(m => m.name || m),
+      timestamp: new Date().toISOString(),
+      ollama_host: process.env.OLLAMA_HOST || 'http://ollama:11434'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Health check for AI service
+router.get('/health', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const ollama = new OllamaService(pool);
+    const isAvailable = await ollama.isAvailable();
+    const models = await ollama.getAvailableModels();
+    
+    res.json({
+      status: isAvailable ? 'healthy' : 'unavailable',
+      ollama_available: isAvailable,
+      models: models.map(m => m.name || m),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Natural language query endpoint
+router.post('/chat', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { query, userId, model } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ message: 'Query is required' });
+    }
+
+    // Use current user if no specific userId provided
+    const targetUserId = userId || req.user.id;
+    
+    // Permission check - advisors can only query their own data, admins can query anyone
+    if (req.user.role === 'advisor' && targetUserId !== req.user.id) {
+      return res.status(403).json({ message: 'Permission denied' });
+    }
+    
+    // Log admin access to other users' data
+    if ((req.user.role === 'admin' || req.user.role === 'administrator') && targetUserId !== req.user.id) {
+      console.log(`🔑 Admin ${req.user.email} accessing data for user ${targetUserId}`);
+    }
+
+    console.log(`🔍 AI Chat Query: "${query}" for user ${targetUserId}`);
+
+    // Get user context
+    const userResult = await pool.query(`
+      SELECT DISTINCT
+        u.id, u.first_name as "firstName", u.last_name as "lastName",
+        u.email, u.role, u.status,
+        s.name as store_name, s.id as store_id,
+        m.name as market_name, m.id as market_id
+      FROM users u
+      LEFT JOIN user_store_assignments usa ON u.id::text = usa.user_id
+      LEFT JOIN stores s ON usa.store_id::integer = s.id
+      LEFT JOIN user_market_assignments uma ON u.id::text = uma.user_id
+      LEFT JOIN markets m ON uma.market_id::integer = m.id
+      WHERE u.id = $1
+    `, [targetUserId]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const userData = userResult.rows[0];
+    
+    // Build user display name
+    userData.name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User';
+
+    // Get recent performance data
+    const performanceResult = await pool.query(`
+      SELECT upload_date, data, store_id
+      FROM performance_data
+      WHERE advisor_user_id = $1
+        AND data_type = 'services'
+      ORDER BY upload_date DESC
+      LIMIT 3
+    `, [targetUserId]);
+
+    // Get goals if available
+    console.log('🎯 Querying goals for user:', targetUserId);
+    const goalsResult = await pool.query(`
+      SELECT metric_name, target_value, period_type, goal_type
+      FROM goals
+      WHERE goal_type = 'advisor' AND advisor_user_id = $1
+      ORDER BY effective_date DESC
+    `, [targetUserId]);
+    console.log('🎯 Goals query completed, found:', goalsResult.rows.length, 'goals');
+
+    // Initialize Ollama service with database pool
+    const ollama = new OllamaService(pool);
+
+    // Build context for AI
+    const context = ollama.buildPerformanceContext(
+      userData, 
+      performanceResult.rows,
+      goalsResult.rows
+    );
+
+    // Generate AI prompt
+    const prompt = ollama.generatePerformancePrompt(query, context);
+
+    // Get AI response
+    const aiResponse = await ollama.generateResponse(prompt, model);
+
+    if (!aiResponse.success) {
+      return res.status(500).json({
+        message: 'AI service error',
+        error: aiResponse.error
+      });
+    }
+
+    res.json({
+      query: query,
+      response: aiResponse.response,
+      context_user: userData.name,
+      context_timeframe: context.timeframe,
+      model_used: aiResponse.model,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ AI Chat Error:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Generate automated insights for an advisor
+router.get('/insights/advisor/:userId', async (req, res) => {
+  try {
+    console.log('🔍 AI Insights Request:', {
+      userId: req.params.userId,
+      type: req.query.type,
+      model: req.query.model,
+      userRole: req.user?.role
+    });
+
+    const pool = req.app.locals.pool;
+    let { userId } = req.params;
+    const { type = 'general', model } = req.query;
+
+    // Handle 'current' userId
+    if (userId === 'current') {
+      userId = req.user.id.toString();
+    }
+
+    // Validate userId is a number
+    const userIdNum = parseInt(userId);
+    if (isNaN(userIdNum)) {
+      console.error('❌ Invalid user ID:', userId);
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
+
+    // Permission check - advisors can only view their own data, admins can view anyone
+    if (req.user.role === 'advisor' && userIdNum !== req.user.id) {
+      return res.status(403).json({ message: 'Permission denied' });
+    }
+    
+    // Log admin access to other users' data
+    if ((req.user.role === 'admin' || req.user.role === 'administrator') && userIdNum !== req.user.id) {
+      console.log(`🔑 Admin ${req.user.email} accessing insights for user ${userIdNum}`);
+    }
+
+    console.log(`📊 Generating ${type} insights for advisor ${userIdNum}`);
+
+    // Get user and performance data (similar to chat endpoint)
+    const userResult = await pool.query(`
+      SELECT DISTINCT
+        u.id, u.first_name as "firstName", u.last_name as "lastName",
+        u.email, u.role, u.status,
+        s.name as store_name, s.id as store_id,
+        m.name as market_name, m.id as market_id
+      FROM users u
+      LEFT JOIN user_store_assignments usa ON u.id::text = usa.user_id
+      LEFT JOIN stores s ON usa.store_id::integer = s.id
+      LEFT JOIN user_market_assignments uma ON u.id::text = uma.user_id
+      LEFT JOIN markets m ON uma.market_id::integer = m.id
+      WHERE u.id = $1
+    `, [userIdNum]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const userData = userResult.rows[0];
+    
+    // Build user display name
+    userData.name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User';
+
+    // Get recent performance data
+    const performanceResult = await pool.query(`
+      SELECT upload_date, data
+      FROM performance_data
+      WHERE advisor_user_id = $1
+        AND data_type = 'services'
+      ORDER BY upload_date DESC
+      LIMIT 3
+    `, [userIdNum]);
+
+    if (performanceResult.rows.length === 0) {
+      return res.json({
+        insights: `No performance data available for ${userData.name}. This user may not be a service advisor or no data has been uploaded yet.`,
+        user: userData.name,
+        role: userData.role,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Get goals
+    const goalsResult = await pool.query(`
+      SELECT metric_name, target_value, period_type, goal_type
+      FROM goals
+      WHERE goal_type = 'advisor' AND advisor_user_id = $1
+      ORDER BY effective_date DESC
+    `, [userIdNum]);
+
+    // Initialize Ollama service with database pool
+    const ollama = new OllamaService(pool);
+    
+    // Build context
+    const context = ollama.buildPerformanceContext(
+      userData, 
+      performanceResult.rows,
+      goalsResult.rows
+    );
+
+    // Generate insights
+    console.log('🤖 Generating prompt for type:', type);
+    const prompt = ollama.generateInsightPrompt(context, type);
+    console.log('📝 Prompt generated, calling AI...');
+    
+    const aiResponse = await ollama.generateResponse(prompt, model);
+    console.log('🎯 AI Response:', { success: aiResponse.success, hasResponse: !!aiResponse.response });
+
+    if (!aiResponse.success) {
+      console.error('❌ AI Generation Failed:', aiResponse.error);
+      return res.status(500).json({
+        message: 'AI service error',
+        error: aiResponse.error
+      });
+    }
+
+    res.json({
+      insights: aiResponse.response,
+      type: type,
+      user: userData.name,
+      data_period: context.timeframe,
+      model_used: aiResponse.model,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ AI Insights Error:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+// Get available AI models
+router.get('/models', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const ollama = new OllamaService(pool);
+    const models = await ollama.getAvailableModels();
+    res.json({
+      models: models,
+      default: ollama.defaultModel,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Error fetching models',
+      error: error.message
+    });
+  }
+});
+
+// Store-level insights (for managers)
+router.get('/insights/store/:storeId', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { storeId } = req.params;
+    const { model } = req.query;
+
+    // Permission check - only managers can access store insights
+    if (!['admin', 'market_manager', 'store_manager'].includes(req.user.role)) {
+      return res.status(403).json({ message: 'Permission denied' });
+    }
+
+    console.log(`🏪 Generating store insights for store ${storeId}`);
+
+    // Get store data and all advisors
+    const storeResult = await pool.query(`
+      SELECT s.*, m.name as market_name
+      FROM stores s
+      LEFT JOIN markets m ON s.market_id = m.id
+      WHERE s.id = $1
+    `, [storeId]);
+
+    if (storeResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Store not found' });
+    }
+
+    // Get all advisors in this store with recent performance
+    const advisorResult = await pool.query(`
+      SELECT 
+        u.id, u.name,
+        pd.upload_date, pd.data
+      FROM users u
+      JOIN performance_data pd ON u.id = pd.advisor_user_id
+      WHERE u.store_id = $1
+        AND pd.data_type = 'services'
+        AND pd.upload_date >= CURRENT_DATE - INTERVAL '30 days'
+      ORDER BY u.name, pd.upload_date DESC
+    `, [storeId]);
+
+    if (advisorResult.rows.length === 0) {
+      return res.json({
+        insights: 'No recent performance data available for this store.',
+        store: storeResult.rows[0].name,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Aggregate performance data for store-level analysis
+    const storeData = {
+      store: storeResult.rows[0],
+      advisors: advisorResult.rows,
+      advisor_count: new Set(advisorResult.rows.map(r => r.id)).size
+    };
+
+    // Initialize Ollama service with database pool
+    const ollama = new OllamaService(pool);
+
+    const prompt = `Analyze this store's performance data and provide insights:
+
+Store: ${storeData.store.name} in ${storeData.store.market_name}
+Total Advisors: ${storeData.advisor_count}
+
+Recent Performance Data:
+${JSON.stringify(storeData.advisors.slice(0, 10), null, 2)}
+
+Provide:
+1. Overall store performance summary
+2. Top performing advisors
+3. Areas needing improvement
+4. Recommended actions for store management
+
+Format as clear bullet points.`;
+
+    const aiResponse = await ollama.generateResponse(prompt, model);
+
+    if (!aiResponse.success) {
+      return res.status(500).json({
+        message: 'AI service error',
+        error: aiResponse.error
+      });
+    }
+
+    res.json({
+      insights: aiResponse.response,
+      store: storeData.store.name,
+      advisor_count: storeData.advisor_count,
+      model_used: aiResponse.model,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Store Insights Error:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;
