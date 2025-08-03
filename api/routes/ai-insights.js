@@ -121,15 +121,13 @@ router.post('/chat', async (req, res) => {
     // Initialize Ollama service with database pool
     const ollama = new OllamaService(pool);
 
-    // Build context for AI
-    const context = ollama.buildPerformanceContext(
-      userData, 
-      performanceResult.rows,
-      goalsResult.rows
-    );
+    // Build enhanced context with all business intelligence
+    const context = await ollama.buildEnhancedContext(targetUserId, query);
 
-    // Generate AI prompt
-    const prompt = ollama.generatePerformancePrompt(query, context);
+    // Generate enhanced AI prompt
+    const prompt = context.business_intelligence 
+      ? ollama.generateEnhancedPrompt(query, context)
+      : ollama.generatePerformancePrompt(query, context);
 
     // Get AI response
     const aiResponse = await ollama.generateResponse(prompt, model);
@@ -144,8 +142,9 @@ router.post('/chat', async (req, res) => {
     res.json({
       query: query,
       response: aiResponse.response,
-      context_user: userData.name,
-      context_timeframe: context.timeframe,
+      context_user: context.user.name,
+      context_timeframe: context.performance?.timeframe || context.timeframe,
+      context_type: context.business_intelligence ? 'enhanced' : 'basic',
       model_used: aiResponse.model,
       timestamp: new Date().toISOString()
     });
@@ -251,16 +250,14 @@ router.get('/insights/advisor/:userId', async (req, res) => {
     // Initialize Ollama service with database pool
     const ollama = new OllamaService(pool);
     
-    // Build context
-    const context = ollama.buildPerformanceContext(
-      userData, 
-      performanceResult.rows,
-      goalsResult.rows
-    );
+    // Build enhanced context for insights
+    const context = await ollama.buildEnhancedContext(userIdNum);
 
-    // Generate insights
-    console.log('🤖 Generating prompt for type:', type);
-    const prompt = ollama.generateInsightPrompt(context, type);
+    // Generate insights with enhanced context
+    console.log('🤖 Generating enhanced insights for type:', type);
+    const prompt = context.business_intelligence 
+      ? ollama.generateEnhancedPrompt(`Generate ${type} insights and recommendations`, context)
+      : ollama.generateInsightPrompt(context, type);
     console.log('📝 Prompt generated, calling AI...');
     
     const aiResponse = await ollama.generateResponse(prompt, model);
@@ -277,8 +274,9 @@ router.get('/insights/advisor/:userId', async (req, res) => {
     res.json({
       insights: aiResponse.response,
       type: type,
-      user: userData.name,
-      data_period: context.timeframe,
+      user: context.user.name,
+      data_period: context.performance?.timeframe || context.timeframe,
+      context_type: context.business_intelligence ? 'enhanced' : 'basic',
       model_used: aiResponse.model,
       timestamp: new Date().toISOString()
     });
