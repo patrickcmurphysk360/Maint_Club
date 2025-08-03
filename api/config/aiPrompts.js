@@ -2,21 +2,26 @@
 // This file controls how the AI agent behaves and responds
 
 const AI_AGENT_CONFIG = {
-  // Model Configuration
+  // Model Configuration - Optimized for automotive performance management
   models: {
-    default: 'llama3.2:latest',
-    fallback: 'llama3.2:latest',
-    // Add other models you have available
-    options: ['llama3.2:latest', 'gemma2:2b', 'qwen2.5:3b']
+    default: 'llama3.1:8b',    // Best for automotive data analysis and numerical reasoning
+    fallback: 'llama3.2:3b',   // Faster backup for simple queries
+    // Focused model options for automotive performance management
+    options: [
+      'llama3.1:8b',          // Primary: Excellent numerical reasoning and business context
+      'llama3.2:3b'           // Backup: Fast, good for basic performance queries
+    ]
   },
 
-  // Generation Parameters
+  // Generation Parameters - Optimized for automotive performance data accuracy
   generation: {
-    temperature: 0.1,  // Low for consistent, factual responses
-    top_k: 10,
-    top_p: 0.3,
-    num_predict: 2048,
-    timeout: 120000    // 2 minutes
+    temperature: 0.2,      // Lower for more consistent, factual responses with metrics
+    top_k: 50,            // Good vocabulary coverage for automotive terms
+    top_p: 0.8,           // Balanced for technical accuracy while maintaining fluency
+    num_predict: 2048,    // Adequate for detailed performance analysis
+    timeout: 120000,      // 2 minutes for complex data queries
+    repeat_penalty: 1.15, // Reduce repetition in numerical reports
+    seed: 42              // Consistent responses for similar performance queries
   },
 
   // Response limits and behavior
@@ -245,6 +250,7 @@ const DATA_FORMATTERS = {
       case 'market_manager':
         return SYSTEM_PROMPTS.manager;
       case 'admin':
+      case 'administrator':
         return SYSTEM_PROMPTS.admin;
       default:
         return SYSTEM_PROMPTS.advisor;

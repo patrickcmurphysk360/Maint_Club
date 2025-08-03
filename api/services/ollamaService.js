@@ -108,7 +108,9 @@ class OllamaService {
           temperature: AI_AGENT_CONFIG.generation.temperature,
           top_k: AI_AGENT_CONFIG.generation.top_k,
           top_p: AI_AGENT_CONFIG.generation.top_p,
-          num_predict: AI_AGENT_CONFIG.generation.num_predict
+          num_predict: AI_AGENT_CONFIG.generation.num_predict,
+          repeat_penalty: AI_AGENT_CONFIG.generation.repeat_penalty || 1.1,
+          seed: AI_AGENT_CONFIG.generation.seed
         }
       };
 
@@ -153,7 +155,9 @@ class OllamaService {
         options: {
           temperature: AI_AGENT_CONFIG.generation.temperature,
           top_k: AI_AGENT_CONFIG.generation.top_k,
-          top_p: AI_AGENT_CONFIG.generation.top_p
+          top_p: AI_AGENT_CONFIG.generation.top_p,
+          repeat_penalty: AI_AGENT_CONFIG.generation.repeat_penalty || 1.1,
+          seed: AI_AGENT_CONFIG.generation.seed
         }
       };
 
@@ -227,11 +231,31 @@ class OllamaService {
       const userData = userResult.rows[0] || {};
       userData.name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User';
 
+      // Get latest MTD data per month
       const performanceResult = await this.pool.query(`
-        SELECT upload_date, data, store_id
-        FROM performance_data
-        WHERE advisor_user_id = $1 AND data_type = 'services'
-        ORDER BY upload_date DESC LIMIT 3
+        WITH latest_per_month AS (
+          SELECT 
+            EXTRACT(YEAR FROM upload_date) as year,
+            EXTRACT(MONTH FROM upload_date) as month,
+            MAX(upload_date) as latest_date
+          FROM performance_data
+          WHERE advisor_user_id = $1 AND data_type = 'services'
+          GROUP BY EXTRACT(YEAR FROM upload_date), EXTRACT(MONTH FROM upload_date)
+          ORDER BY year DESC, month DESC
+          LIMIT 3
+        )
+        SELECT 
+          pd.upload_date, 
+          pd.data, 
+          pd.store_id,
+          s.name as store_name,
+          m.name as market_name
+        FROM performance_data pd
+        LEFT JOIN stores s ON pd.store_id = s.id
+        LEFT JOIN markets m ON s.market_id = m.id
+        JOIN latest_per_month lpm ON pd.upload_date = lpm.latest_date
+        WHERE pd.advisor_user_id = $1 AND pd.data_type = 'services'
+        ORDER BY pd.upload_date DESC
       `, [userId]);
 
       const goalsResult = await this.pool.query(`
@@ -246,8 +270,8 @@ class OllamaService {
           id: userData.id,
           name: userData.name,
           role: userData.role,
-          market: userData.market_name,
-          store: userData.store_name
+          market: userData.market_name || userData.market,
+          store: userData.store_name || userData.store
         },
         performance: {
           latest: performanceResult.rows[0]?.data || {},
@@ -346,6 +370,17 @@ ${goalsSection}`;
           });
         }
 
+        if (bi.market_performance && bi.market_performance.length > 0) {
+          contextInfo += `
+
+**MARKET PERFORMANCE DATA (Latest MTD Spreadsheet):**`;
+          bi.market_performance.slice(0, 3).forEach(perf => {
+            const uploadMonth = new Date(perf.upload_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+            contextInfo += `
+- ${perf.market_name} - ${uploadMonth} MTD: $${perf.total_sales?.toLocaleString() || 'N/A'} total sales, ${perf.advisor_count} advisors, ${perf.avg_gp_percent?.toFixed(1) || 'N/A'}% avg GP`;
+          });
+        }
+
         if (bi.stores && bi.stores.length > 0) {
           contextInfo += `
 
@@ -401,6 +436,77 @@ ${goalsSection}`;
 - ${context.benchmarking.peers.length} peer advisors for benchmarking`;
       }
 
+      // Add top performers if available
+      if (context.benchmarking?.top_performers && context.benchmarking.top_performers.length > 0) {
+        contextInfo += `
+
+**TOP PERFORMERS (Latest MTD):**`;
+        context.benchmarking.top_performers.forEach((performer, index) => {
+          contextInfo += `
+${index + 1}. ${performer.advisor_name} (${performer.store}): ${performer.metric_value} units - $${performer.total_sales?.toLocaleString() || 'N/A'} total sales`;
+        });
+      }
+
+      // Add organizational context
+      if (context.organizational?.is_org_query && context.organizational.query_specific_data) {
+        contextInfo += `
+
+**ORGANIZATIONAL QUERY RESULTS:**`;
+        const orgData = context.organizational.query_specific_data;
+        if (orgData.length > 0) {
+          // Check if this is store history data (has performance_records field)
+          const isStoreHistory = orgData[0].performance_records !== undefined;
+          
+          if (isStoreHistory) {
+            contextInfo += `
+Found store assignment history for ${orgData.length} location(s):`;
+            orgData.slice(0, 10).forEach(assignment => {
+              const empName = `${assignment.first_name} ${assignment.last_name}`;
+              const storeName = assignment.store_name || 'Unknown Store';
+              const marketName = assignment.market_name || 'Unknown Market';
+              const assignedDate = assignment.assigned_at ? new Date(assignment.assigned_at).toLocaleDateString() : 'Unknown';
+              const perfRecords = assignment.performance_records || 0;
+              contextInfo += `
+- ${empName} worked at ${storeName} (${marketName}) - Assigned: ${assignedDate} - ${perfRecords} performance records`;
+            });
+          } else {
+            contextInfo += `
+Found ${orgData.length} matching employee(s):`;
+            orgData.slice(0, 10).forEach(emp => {
+              const empName = `${emp.first_name} ${emp.last_name}`;
+              const empRole = emp.role || 'N/A';
+              const empStore = emp.store_name || 'Unassigned';
+              const empMarket = emp.market_name || 'N/A';
+              contextInfo += `
+- ${empName} (${empRole}) - ${empStore} store, ${empMarket} market`;
+            });
+          }
+          if (orgData.length > 10) {
+            contextInfo += `
+... and ${orgData.length - 10} more employees`;
+          }
+        } else {
+          contextInfo += `
+No matching employees found for the query.`;
+        }
+      } else if (context.organizational?.structure && context.organizational.structure.length > 0) {
+        // Show general org structure context
+        const orgStructure = context.organizational.structure;
+        const roleGroups = {};
+        orgStructure.forEach(emp => {
+          if (!roleGroups[emp.role]) roleGroups[emp.role] = 0;
+          roleGroups[emp.role]++;
+        });
+        
+        contextInfo += `
+
+**ORGANIZATIONAL STRUCTURE CONTEXT:**`;
+        Object.entries(roleGroups).forEach(([role, count]) => {
+          contextInfo += `
+- ${count} ${role}${count !== 1 ? 's' : ''}`;
+        });
+      }
+
       // Add coaching context
       if (context.coaching?.recent_threads && context.coaching.recent_threads.length > 0) {
         contextInfo += `
@@ -417,7 +523,16 @@ ${contextInfo}
 
 **USER QUERY:** ${query}
 
-Provide detailed, data-driven insights based on all available information. Reference specific metrics, compare to goals, and provide actionable recommendations. If asked about markets, stores, vendors, or peers, use the business intelligence data provided.`;
+IMPORTANT GUIDELINES:
+1. **Organizational Questions**: When asked about "who works at", "employees at", "staff at", or similar queries, use the ORGANIZATIONAL QUERY RESULTS section above to provide specific, accurate information about employees and their roles/assignments.
+
+2. **Performance Data**: All performance data comes from the latest MTD (month-to-date) spreadsheet for each time period. When asked about monthly sales/performance, use the final MTD totals from the last upload of that month.
+
+3. **People Recognition**: Always use full names and specific roles when referring to employees. Include their store and market assignments when relevant.
+
+${context.organizational?.is_org_query ? 
+`**SPECIAL INSTRUCTION**: This appears to be an organizational query. Focus your response on the employee information found in the ORGANIZATIONAL QUERY RESULTS section. Provide clear, specific details about who works where and in what role.` :
+`Provide detailed, data-driven insights based on all available information. Reference specific metrics, compare to goals, and provide actionable recommendations.`}`;
 
       return enhancedTemplate;
 
