@@ -34,6 +34,7 @@ const aiConfigRoutes = require('./routes/ai-config');
 const aiSettingsRoutes = require('./routes/ai-settings');
 const aiBenchmarksRoutes = require('./routes/ai-benchmarks');
 const aiValidationDashboardRoutes = require('./routes/ai-validation-dashboard');
+const aiPolicyCheckRoutes = require('./routes/ai-policy-check');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -124,6 +125,7 @@ app.use('/api/ai-config', authenticateToken, aiConfigRoutes);
 app.use('/api/ai-settings', authenticateToken, aiSettingsRoutes);
 app.use('/api/ai-benchmarks', authenticateToken, aiBenchmarksRoutes);
 app.use('/api/ai-validation', authenticateToken, aiValidationDashboardRoutes);
+app.use('/api/ai-policy-check', authenticateToken, aiPolicyCheckRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

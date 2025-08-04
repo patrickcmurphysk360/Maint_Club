@@ -10,10 +10,10 @@
 const axios = require('axios');
 const { Pool } = require('pg');
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'http://localhost:5002/api';
 const TEST_CONFIG = {
-  email: 'admin@test.com',
-  password: 'test123',
+  email: 'admin@example.com',
+  password: 'admin123',
   testUserId: 1
 };
 

@@ -77,8 +77,8 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
     );
   }
 
-  // Build endpoint URL
-  const apiBaseURL = baseURL || process.env.API_BASE_URL || 'http://localhost:5000';
+  // Build endpoint URL - use internal Docker service name for containerized environments
+  const apiBaseURL = baseURL || process.env.API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'http://maintenance-club-api:5000');
   const endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
   
   console.log(`📊 POLICY ENFORCEMENT: Accessing validated scorecard data`);
@@ -283,7 +283,7 @@ function validateDataSource(data) {
  * Health check utility
  */
 async function checkScorecardAPIHealth(baseURL = null) {
-  const apiBaseURL = baseURL || process.env.API_BASE_URL || 'http://localhost:5000';
+  const apiBaseURL = baseURL || process.env.API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'http://maintenance-club-api:5000');
   
   console.log('🏥 Checking scorecard API health...');
   

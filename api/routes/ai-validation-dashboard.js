@@ -6,8 +6,40 @@
  */
 
 const express = require('express');
-const { authenticateToken, requireRole } = require('../middleware/auth');
+const jwt = require('jsonwebtoken');
 const AIValidationMiddleware = require('../middleware/aiValidationMiddleware');
+
+// Auth middleware functions (inline since they're not in a separate file)
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ message: 'Authentication token is required' });
+  }
+  
+  jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, user) => {
+    if (err) {
+      return res.status(403).json({ message: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+const requireRole = (roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Insufficient permissions' });
+    }
+    
+    next();
+  };
+};
 
 const router = express.Router();
 

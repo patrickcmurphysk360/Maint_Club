@@ -178,7 +178,6 @@ router.post('/chat', async (req, res) => {
     }
 
     res.json(responseData);
-    });
 
   } catch (error) {
     console.error('❌ AI Chat Error:', error);
