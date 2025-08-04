@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { AI_AGENT_CONFIG, PROMPT_TEMPLATES, DATA_FORMATTERS } = require('../config/aiPrompts');
 const AIDataService = require('./aiDataService');
+const ScorecardFieldValidator = require('./scorecardFieldValidator');
 
 class OllamaService {
   constructor(pool = null) {
@@ -8,6 +9,7 @@ class OllamaService {
     this.defaultModel = process.env.OLLAMA_MODEL || AI_AGENT_CONFIG.models.default;
     this.pool = pool;
     this.aiDataService = pool ? new AIDataService(pool) : null;
+    this.scorecardValidator = new ScorecardFieldValidator(pool);
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 120000, // 2 minute timeout for AI responses
@@ -94,7 +96,7 @@ class OllamaService {
     }
   }
 
-  async generateResponse(prompt, model = null, context = null) {
+  async generateResponse(prompt, model = null, context = null, userId = null, query = null, contextData = null) {
     try {
       const requestModel = model || this.defaultModel;
       
@@ -122,13 +124,46 @@ class OllamaService {
       
       if (response.data && response.data.response) {
         console.log(`✅ AI response generated (${response.data.response.length} chars)`);
-        return {
+        
+        let finalResponse = {
           success: true,
           response: response.data.response,
           context: response.data.context,
           model: requestModel,
           done: response.data.done
         };
+
+        // SCORECARD VALIDATION: Validate response if needed
+        if (userId && query && this.scorecardValidator.shouldValidate(query, contextData)) {
+          console.log('🛡️ Validating AI response against scorecard field whitelist...');
+          
+          const validation = await this.scorecardValidator.validateResponse(
+            response.data.response,
+            userId,
+            query,
+            contextData
+          );
+
+          // Add validation metadata to response
+          finalResponse.validation = {
+            isValid: validation.isValid,
+            violationCount: validation.violations.length,
+            approvedFieldCount: validation.approvedFields.length
+          };
+
+          // Sanitize response if needed
+          if (!validation.isValid) {
+            console.warn(`⚠️ Response validation failed with ${validation.violations.length} violations`);
+            finalResponse.response = this.scorecardValidator.sanitizeResponse(
+              response.data.response,
+              validation
+            );
+          } else {
+            console.log(`✅ Response validation passed with ${validation.approvedFields.length} approved fields`);
+          }
+        }
+
+        return finalResponse;
       } else {
         throw new Error('Invalid response format from Ollama');
       }
@@ -142,7 +177,7 @@ class OllamaService {
     }
   }
 
-  async chatCompletion(messages, model = null) {
+  async chatCompletion(messages, model = null, userId = null, query = null, contextData = null) {
     try {
       const requestModel = model || this.defaultModel;
       
@@ -165,12 +200,45 @@ class OllamaService {
       
       if (response.data && response.data.message) {
         console.log(`✅ Chat response generated`);
-        return {
+        
+        let finalResponse = {
           success: true,
           message: response.data.message,
           model: requestModel,
           done: response.data.done
         };
+
+        // SCORECARD VALIDATION: Validate response if needed
+        if (userId && query && this.scorecardValidator.shouldValidate(query, contextData)) {
+          console.log('🛡️ Validating AI response against scorecard field whitelist...');
+          
+          const validation = await this.scorecardValidator.validateResponse(
+            response.data.message.content,
+            userId,
+            query,
+            contextData
+          );
+
+          // Add validation metadata to response
+          finalResponse.validation = {
+            isValid: validation.isValid,
+            violationCount: validation.violations.length,
+            approvedFieldCount: validation.approvedFields.length
+          };
+
+          // Sanitize response if needed
+          if (!validation.isValid) {
+            console.warn(`⚠️ Response validation failed with ${validation.violations.length} violations`);
+            finalResponse.message.content = this.scorecardValidator.sanitizeResponse(
+              response.data.message.content,
+              validation
+            );
+          } else {
+            console.log(`✅ Response validation passed with ${validation.approvedFields.length} approved fields`);
+          }
+        }
+
+        return finalResponse;
       } else {
         throw new Error('Invalid chat response format from Ollama');
       }
@@ -333,41 +401,57 @@ class OllamaService {
 
 **PERFORMANCE DATA:**`;
 
-      if (context.performance?.latest && Object.keys(context.performance.latest).length > 0) {
-        if (context.performance.is_specific_person_query) {
-          contextInfo += `
-**SPECIFIC PERSON PERFORMANCE: ${context.performance.specific_person_name?.toUpperCase() || 'UNKNOWN'}**
-Store: ${context.performance.store_name || 'Unknown'}
-Period: ${context.performance.timeframe ? new Date(context.performance.timeframe).toLocaleDateString() : 'Unknown'}`;
-          
-          const latest = context.performance.latest;
-          contextInfo += `
-- Sales: $${latest.sales?.toLocaleString() || 'N/A'}
-- GP Sales: $${latest.gpSales?.toLocaleString() || 'N/A'} (${latest.gpPercent || 'N/A'}%)
-- Invoices: ${latest.invoices || 'N/A'}
-- Alignments: ${latest.alignments || 'N/A'}
-- Oil Changes: ${latest.oilChange || 'N/A'}
-- Retail Tires: ${latest.retailTires || 'N/A'}`;
-
-          if (context.performance.recent_data && context.performance.recent_data.length > 1) {
+      // PERFORMANCE DATA: Use ONLY validated scorecard data
+      if (context.performance?.is_performance_query && context.performance?.validated_data) {
+        const validatedData = context.performance.validated_data;
+        
+        if (validatedData.success && validatedData.data) {
+          if (context.performance.is_specific_person_query) {
             contextInfo += `
-
-**RECENT PERFORMANCE HISTORY:**`;
-            context.performance.recent_data.slice(1, 4).forEach((record, index) => {
-              const date = new Date(record.upload_date).toLocaleDateString();
+**VALIDATED SCORECARD DATA: ${context.performance.specific_person_name?.toUpperCase() || 'UNKNOWN'}**
+Source: ${validatedData.source} (${validatedData.endpoint})
+Retrieved: ${new Date(validatedData.retrieved_at).toLocaleDateString()}`;
+            
+            const scorecardData = validatedData.data;
+            contextInfo += `
+- Sales: $${scorecardData.sales?.toLocaleString() || 'N/A'}
+- GP Sales: $${scorecardData.gpSales?.toLocaleString() || 'N/A'} (${scorecardData.gpPercent || 'N/A'}%)
+- Invoices: ${scorecardData.invoices || 'N/A'}
+- Alignments: ${scorecardData.alignments || 'N/A'}
+- Oil Changes: ${scorecardData.oilChange || 'N/A'}
+- Retail Tires: ${scorecardData.retailTires || 'N/A'}
+- TPP: ${scorecardData.tpp || 'N/A'}
+- PAT: ${scorecardData.pat || 'N/A'}`;
+            
+            if (scorecardData.fluid_attach_rates) {
               contextInfo += `
-${date} (${record.store_name}): $${record.data.sales?.toLocaleString() || 'N/A'} sales, ${record.data.gpPercent || 'N/A'}% GP`;
-            });
+- Fluid Attach Rates: ${JSON.stringify(scorecardData.fluid_attach_rates)}`;
+            }
+          } else {
+            contextInfo += `
+**VALIDATED SCORECARD DATA:**
+Source: ${validatedData.source} (${validatedData.endpoint})
+Retrieved: ${new Date(validatedData.retrieved_at).toLocaleDateString()}`;
+            
+            const scorecardData = validatedData.data;
+            contextInfo += `
+- Sales: $${scorecardData.sales?.toLocaleString() || 'N/A'}
+- GP Sales: $${scorecardData.gpSales?.toLocaleString() || 'N/A'} (${scorecardData.gpPercent || 'N/A'}%)
+- Invoices: ${scorecardData.invoices || 'N/A'}
+- TPP: ${scorecardData.tpp || 'N/A'}
+- PAT: ${scorecardData.pat || 'N/A'}`;
           }
         } else {
-          const perfData = DATA_FORMATTERS.formatPerformanceData(context.performance.latest);
           contextInfo += `
-${perfData}
-- Data Period: ${context.performance.timeframe || 'Unknown'}`;
+**PERFORMANCE DATA ERROR:** ${validatedData.error}
+Source: ${validatedData.source}`;
         }
+      } else if (context.performance?.is_performance_query) {
+        contextInfo += `
+**PERFORMANCE DATA:** Query detected but no validated scorecard data available`;
       } else {
         contextInfo += `
-- No recent performance data available`;
+**PERFORMANCE DATA:** Not a performance-related query - no scorecard data requested`;
       }
 
       // Add goals information
@@ -551,22 +635,34 @@ ${contextInfo}
 
 **USER QUERY:** ${query}
 
-IMPORTANT GUIDELINES:
-1. **Top Performer Queries**: When asked about "top advisors", "best performers", "highest", etc., use the TOP PERFORMERS section above to provide specific rankings with names, stores, and performance metrics.
+CRITICAL PERFORMANCE DATA RULES:
+1. **SCORECARD API ONLY**: All performance metrics (TPP, PAT, fluid attach rates, sales, etc.) MUST come from validated scorecard API endpoints. Never infer, calculate, or approximate these values.
 
-2. **Organizational Questions**: When asked about "who works at", "employees at", "staff at", or similar queries, use the ORGANIZATIONAL QUERY RESULTS section above to provide specific, accurate information about employees and their roles/assignments.
+2. **Single Source of Truth**: Use ONLY these endpoints for performance data:
+   - /api/scorecard/advisor/:userId
+   - /api/scorecard/store/:storeId  
+   - /api/scorecard/market/:marketId
 
-3. **Performance Data**: All performance data comes from the latest MTD (month-to-date) spreadsheet for each time period. When asked about monthly sales/performance, use the final MTD totals from the last upload of that month.
+3. **No Raw Spreadsheet Data**: Never reference or use raw MTD spreadsheet data for performance metrics. Always use the validated scorecard data shown in the VALIDATED SCORECARD DATA section above.
 
-4. **People Recognition**: Always use full names and specific roles when referring to employees. Include their store and market assignments when relevant.
+4. **Performance Query Detection**: If this is marked as a performance query (is_performance_query: true), you MUST use only the validated scorecard data provided.
 
-${context.performance?.is_specific_person_query ? 
-`**SPECIAL INSTRUCTION FOR ADMIN**: This is a query about a specific person's performance. Provide a direct, objective summary of the performance data shown above. Focus on key metrics without unnecessary narrative. Use bullet points for clarity.` :
+ADDITIONAL GUIDELINES:
+5. **Top Performer Queries**: When asked about "top advisors", use the TOP PERFORMERS section with validated data.
+
+6. **Organizational Questions**: Use the ORGANIZATIONAL QUERY RESULTS section for employee information.
+
+7. **People Recognition**: Always use full names and specific roles when referring to employees.
+
+${context.performance?.is_performance_query ? 
+`**CRITICAL**: This is a PERFORMANCE QUERY. You MUST use ONLY the VALIDATED SCORECARD DATA shown above. Do not infer, calculate, or reference any other performance metrics. If the validated data shows an error, inform the user that scorecard data is unavailable.` :
+context.performance?.is_specific_person_query ? 
+`**SPECIAL INSTRUCTION**: This is a query about a specific person's performance using VALIDATED SCORECARD DATA. Provide a direct, objective summary of the validated scorecard metrics shown above.` :
 context.benchmarking?.is_top_performer_query ? 
-`**SPECIAL INSTRUCTION**: This is a top performer query. Focus your response on the rankings and performance metrics found in the TOP PERFORMERS section. Provide specific names, stores, and performance numbers.` :
+`**SPECIAL INSTRUCTION**: This is a top performer query. Focus on the rankings and performance metrics found in the TOP PERFORMERS section.` :
 context.organizational?.is_org_query ? 
-`**SPECIAL INSTRUCTION**: This appears to be an organizational query. Focus your response on the employee information found in the ORGANIZATIONAL QUERY RESULTS section. Provide clear, specific details about who works where and in what role.` :
-`Provide detailed, data-driven insights based on all available information. Reference specific metrics, compare to goals, and provide actionable recommendations.`}`;
+`**SPECIAL INSTRUCTION**: This is an organizational query. Focus on the employee information found in the ORGANIZATIONAL QUERY RESULTS section.` :
+`Provide insights based on available information. For performance-related questions, direct users to ask specific performance queries that will trigger scorecard API usage.`}`;
 
       return enhancedTemplate;
 

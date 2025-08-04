@@ -1,278 +1,336 @@
-# 🤖 AI Agent Configuration Guide
+# AI Agent Configuration Guide
+
+**Last Updated:** August 4, 2025  
+**Version:** 2.0 - Scorecard API Integration & Validation Layer
 
 ## Overview
-The Maintenance Club AI agent is built on your local Ollama infrastructure and provides performance insights through natural language conversations. This guide explains how to configure and customize the AI's behavior, prompts, and responses.
 
-## Architecture
+The AI agent provides intelligent insights and answers to business questions using **validated data sources only**. This guide outlines the strict data governance, validation mechanisms, and architectural constraints that ensure data accuracy and prevent the use of unvalidated sources.
+
+## 🔒 Critical Data Governance Rules
+
+### **APPROVED DATA SOURCES**
+
+#### **1. Performance Data - SCORECARD API ONLY**
+All performance metrics MUST come from these validated endpoints:
 
 ```
-User Query → Frontend Chat → API Routes → OllamaService → Ollama Models → Formatted Response
-                                      ↑
-                               Configuration Files
-                               (/config/aiPrompts.js)
+✅ /api/scorecard/advisor/:userId    - Individual advisor performance
+✅ /api/scorecard/store/:storeId     - Store-level aggregated performance  
+✅ /api/scorecard/market/:marketId   - Market-level aggregated performance
 ```
 
-## Configuration Files
+**Approved Performance Fields:**
+- `sales`, `gpSales`, `gpPercent`, `invoices`
+- `alignments`, `oilChange`, `retailTires`, `brakeService`
+- `tpp`, `pat` (calculated by scorecard system)
+- `fluid_attach_rates` (complex object from scorecard system)
+- Metadata: `store_name`, `market_name`, `advisor_name`, `period`
 
-### 1. Main Configuration: `/api/config/aiPrompts.js`
+#### **2. Organizational Data - DATABASE LOOKUPS ONLY**
+All organizational information comes from validated database relationships:
 
-This file contains all AI behavior settings:
+```sql
+✅ users + user_store_assignments + user_market_assignments
+✅ stores + markets (for location data)
+✅ Proper JOIN operations using assignment tables
+```
 
-#### **A. Model Configuration**
+### **FORBIDDEN DATA SOURCES & BEHAVIORS**
+
+#### **❌ Raw Spreadsheet Data**
+- Never use `performance_data` table directly for metrics
+- No access to `avgSpend`, `mtdSales`, `rawData`, `spreadsheetData`
+- No MTD upload files or raw performance imports
+
+#### **❌ Inferred or Calculated Metrics**
+- Never calculate TPP, PAT, or fluid attach rates
+- No approximations like `calculatedTPP`, `inferredPAT`
+- No estimated metrics like `estimatedAttachRate`
+
+#### **❌ Organizational Inference**
+- Never infer org structure from performance data
+- No extraction of manager/store info from spreadsheets
+- Must use official assignment tables only
+
+## 🏗️ System Architecture
+
+### **AI Data Service** (`aiDataService.js`)
+
+**Core Methods:**
 ```javascript
-models: {
-  default: 'llama3.2:latest',        // Primary model to use
-  fallback: 'llama3.2:latest',       // Backup if primary fails
-  options: ['llama3.2:latest', 'gemma2:2b', 'qwen2.5:3b']  // Available models
+// NEW: Primary method for performance data
+getValidatedScorecardResponse(targetType, targetId, contextUserId)
+
+// Performance intent detection
+detectPerformanceIntent(query) 
+
+// Organizational lookups (unchanged)
+getUserContext(userId)
+getStoreEmployees(storeId, storeName)
+getOrganizationalStructure(marketId)
+
+// DEPRECATED: Legacy method (warns when used)
+getPerformanceData(userId, limit) // ⚠️ Use getValidatedScorecardResponse instead
+```
+
+**Query Flow:**
+1. **Intent Detection**: `detectPerformanceIntent()` identifies performance queries
+2. **Data Routing**: Performance queries → `getValidatedScorecardResponse()` → scorecard API
+3. **Organizational Routing**: Non-performance queries → database lookups
+4. **Context Building**: Validated data with clear source attribution
+
+### **Ollama Service** (`ollamaService.js`)
+
+**Enhanced Features:**
+- Integrated `ScorecardFieldValidator` for response validation
+- Updated prompt templates with strict data source rules
+- Response interception and sanitization
+- Validation metadata in all responses
+
+### **Scorecard Field Validator** (`scorecardFieldValidator.js`)
+
+**Key Responsibilities:**
+- Validates AI responses against approved field whitelist
+- Detects forbidden field usage (raw spreadsheet data)
+- Logs violations with full context
+- Sanitizes responses with warning messages for violations
+
+## 🛡️ Validation & Monitoring System
+
+### **Response Validation Pipeline**
+
+```javascript
+// Automatic validation for performance queries
+if (shouldValidate(query, contextData)) {
+  const validation = await scorecardValidator.validateResponse(
+    aiResponse, userId, query, contextData
+  );
+  
+  // Add validation metadata
+  response.validation = {
+    status: validation.isValid ? 'passed' : 'failed',
+    violations: validation.violationCount,
+    approved_fields: validation.approvedFieldCount
+  };
 }
 ```
 
-#### **B. Generation Parameters**
-```javascript
-generation: {
-  temperature: 0.1,    // 0.0-2.0 (0.1 = focused, 1.0 = creative)
-  top_k: 10,          // Limits vocabulary to top K tokens
-  top_p: 0.3,         // Nucleus sampling threshold  
-  num_predict: 2048,  // Max response length in tokens
-  timeout: 120000     // Request timeout (2 minutes)
-}
+### **Violation Logging** (`ai_scorecard_violations` table)
+
+**Logged Information:**
+- User ID and original query
+- Detected violations with field names and types
+- Severity levels: `low`, `medium`, `high`, `critical`
+- Response excerpts containing violations
+- Timestamps for trend analysis
+
+**Violation Types:**
+- `forbidden_field` - Use of explicitly banned fields
+- `unapproved_performance_field` - Performance field not in whitelist
+- `invalid_data_source` - Performance metrics without scorecard API source
+- `system_error` - Validation system failures
+
+### **Management Endpoints** (`/api/ai-validation/`)
+
+```
+GET /stats                 - Validation statistics (admin only)
+GET /violations           - Recent violations (users see own, admins see all)
+GET /violated-fields      - Most frequently violated fields (admin only)
+GET /approved-fields      - Reference whitelist (all users)
+POST /test               - Test validation on sample text (admin only)
+GET /dashboard           - Comprehensive validation overview (admin only)
 ```
 
-#### **C. System Prompts**
-Define the AI's core personality and behavior:
+## 🔧 Configuration & Environment
 
-- **Base Prompt**: Core identity as automotive service coach
-- **Role-Specific Prompts**: Different behavior for advisors vs managers
-- **Response Guidelines**: Tone, format, and content requirements
-
-## Prompt Templates
-
-### 1. Chat Conversations (`PROMPT_TEMPLATES.chat`)
-Template for natural language Q&A:
-```
-System Identity + Role-Specific Behavior + User Context + Performance Data + User Question
-```
-
-### 2. Automated Insights (`PROMPT_TEMPLATES.insights`)
-Four types of automated analysis:
-
-- **General**: Overall performance summary (3 key insights)
-- **Goals**: Goal vs actual performance comparison
-- **Trends**: Pattern identification and trend analysis  
-- **Coaching**: Specific improvement recommendations
-
-## Customization Guide
-
-### 1. **Modifying AI Personality**
-
-Edit `SYSTEM_PROMPTS.base` in `/api/config/aiPrompts.js`:
-
-```javascript
-base: `You are an AI performance coach for automotive service advisors.
-
-CORE IDENTITY:
-- [Your custom identity here]
-- [Specific expertise areas]
-- [Communication style preferences]
-
-RESPONSE STYLE:
-- [Custom formatting rules]
-- [Tone guidelines]
-- [Length preferences]
-```
-
-### 2. **Adjusting Response Behavior**
-
-**For More Creative Responses:**
-```javascript
-generation: {
-  temperature: 0.7,  // Increase for more varied responses
-  top_p: 0.8,        // Broader vocabulary selection
-}
-```
-
-**For More Focused/Factual Responses:**
-```javascript
-generation: {
-  temperature: 0.1,  // Decrease for consistent responses
-  top_k: 5,          // Limit to most likely words
-}
-```
-
-### 3. **Custom Prompt Templates**
-
-Add new insight types in `PROMPT_TEMPLATES.insights`:
-
-```javascript
-weekly_review: `${SYSTEM_PROMPTS.base}
-
-WEEKLY PERFORMANCE REVIEW FOR: {userName}
-
-{performanceData}
-
-TASK: Provide a comprehensive weekly review with specific action items.
-
-FORMAT YOUR RESPONSE AS:
-📊 **Week Overview:**
-• [Key metric 1]
-• [Key metric 2]
-
-🎯 **This Week's Focus:**
-• [Priority 1]
-• [Priority 2]
-
-📈 **Next Week Goals:**
-• [Specific targets]
-`
-```
-
-### 4. **Role-Based Customization**
-
-Modify `DATA_FORMATTERS.getRolePrompt()` for role-specific behavior:
-
-```javascript
-case 'store_manager':
-  return `You are providing store management insights. Focus on:
-  - Team performance optimization
-  - Operational efficiency
-  - Individual advisor development
-  - Customer satisfaction metrics`;
-```
-
-## API Endpoints for Configuration
-
-### Admin-Only Configuration APIs:
-
-```javascript
-GET  /api/ai-config/config           // View current configuration
-PUT  /api/ai-config/agent           // Update AI behavior settings  
-POST /api/ai-config/test-prompt     // Test prompt templates
-GET  /api/ai-config/metrics         // AI usage statistics
-```
-
-### Example: Testing a Custom Prompt
-```javascript
-POST /api/ai-config/test-prompt
-{
-  "customPrompt": "You are a sales coach. Analyze this data and provide 3 specific sales improvement tips.",
-  "testContext": {
-    "user": {"name": "John", "role": "advisor"},
-    "performance": {"sales": 5000, "invoices": 100}
-  }
-}
-```
-
-## Environment Variables
-
-Configure in Docker Compose or environment:
+### **Environment Variables**
 
 ```bash
-OLLAMA_HOST=http://ollama:11434      # Ollama service URL
-OLLAMA_MODEL=llama3.2:latest         # Default model name
+# AI Service Configuration
+OLLAMA_HOST=http://ollama:11434
+OLLAMA_MODEL=llama3.1:8b
+API_BASE_URL=http://localhost:5000
+
+# Validation Settings
+ENABLE_SCORECARD_VALIDATION=true
+LOG_VALIDATION_VIOLATIONS=true
+VALIDATION_STRICTNESS=high  # low, medium, high, critical
 ```
 
-## Automotive Service Context
+### **Database Setup**
 
-### Performance Metrics Available:
-- **Sales Data**: Total sales, GP (Gross Profit), GP percentage
-- **Service Counts**: Oil changes, alignments, brake services, etc.
-- **Operational**: Invoices, labor hours, effective labor rate
-- **Customer Metrics**: Average RO (Repair Order), customer satisfaction
+**Required Migration:**
+```bash
+psql -d maintenance_club_mvp -f database-scripts/07-scorecard-validation-logging.sql
+```
 
-### Industry-Specific Prompts:
-The AI understands automotive terminology:
-- Service advisors vs technicians
-- RO (Repair Order) workflows  
-- Upselling and service recommendations
-- Seasonal service patterns
-- Vendor/manufacturer relationships
+**Key Tables:**
+- `ai_scorecard_violations` - Violation logging
+- `scorecard_violation_stats` - Daily statistics view
+- `get_top_violated_fields()` - Function for violation analysis
 
-## Best Practices
+## 📋 API Usage Examples
 
-### 1. **Prompt Engineering**
-- Be specific about desired output format
-- Include examples in prompts when possible
-- Use consistent terminology
-- Set clear boundaries on what AI should/shouldn't do
+### **Performance Query (Validated)**
 
-### 2. **Model Selection**
-- **llama3.2**: Best for general conversations and analysis
-- **gemma2**: Good for structured responses
-- **qwen2.5**: Strong at reasoning and problem-solving
-
-### 3. **Performance Optimization**
-- Keep context data concise but complete
-- Use lower temperature for consistent business advice
-- Set appropriate token limits to control response length
-
-### 4. **Data Privacy**
-- AI only sees data explicitly passed in context
-- No conversation history is stored by default
-- Performance data is anonymized for AI processing
-
-## Troubleshooting
-
-### Common Issues:
-
-1. **AI Responses Too Vague**
-   - Increase detail in prompts
-   - Provide more specific context data
-   - Lower temperature for focused responses
-
-2. **Responses Too Long**
-   - Reduce `num_predict` parameter
-   - Add length guidelines to system prompt
-   - Use bullet points in prompt formatting
-
-3. **Model Not Available**
-   - Check Ollama container status
-   - Verify model is downloaded: `docker exec ollama ollama list`
-   - Update `AI_AGENT_CONFIG.models.options`
-
-## Testing Your Configuration
-
-1. **Use the debug endpoint**: `GET /api/ai-insights/debug` (no auth)
-2. **Test prompts**: Use `/api/ai-config/test-prompt` 
-3. **Monitor logs**: Check container logs for AI generation details
-4. **Frontend testing**: Use the chat interface with various queries
-
-## Example Configurations
-
-### Conservative Business Coach
 ```javascript
-generation: {
-  temperature: 0.1,
-  top_k: 5,
-  top_p: 0.2
+// Request
+POST /api/ai-insights/chat
+{
+  "query": "What were John's sales last month?",
+  "userId": 123
 }
-// + Structured prompts with bullet points
-```
 
-### Creative Performance Analyst  
-```javascript
-generation: {
-  temperature: 0.7,
-  top_k: 40,
-  top_p: 0.9
+// Response
+{
+  "query": "What were John's sales last month?",
+  "response": "Based on validated scorecard data, John's sales were $45,230...",
+  "validation": {
+    "status": "passed",
+    "violations": 0,
+    "approved_fields": 3
+  },
+  "context_type": "enhanced"
 }
-// + Open-ended prompts encouraging exploration
 ```
 
-### Technical Service Expert
+### **Organizational Query**
+
 ```javascript
-// Focus prompts on specific automotive procedures
-// Include detailed service terminology
-// Reference manufacturer recommendations
+// Request  
+POST /api/ai-insights/chat
+{
+  "query": "Who works at the downtown store?",
+  "userId": 123
+}
+
+// Response - Uses database lookups, no scorecard validation needed
+{
+  "query": "Who works at the downtown store?",
+  "response": "The downtown store has 5 employees: John Smith (manager)...",
+  "context_type": "enhanced"
+}
 ```
+
+## 🚨 Development & Debugging
+
+### **Debug Flags**
+
+```javascript
+// Enable detailed validation logging
+process.env.DEBUG_SCORECARD_VALIDATION = 'true'
+
+// Show all field extractions
+process.env.DEBUG_FIELD_EXTRACTION = 'true'
+
+// Log all AI context building
+process.env.DEBUG_AI_CONTEXT = 'true'
+```
+
+### **Console Monitoring**
+
+**Validation Success:**
+```
+✅ Scorecard validation passed for user 123
+   Approved fields used: sales, gpPercent, tpp
+```
+
+**Validation Failure:**
+```
+⚠️ Scorecard validation FAILED for user 123
+   HIGH: Use of forbidden field 'rawSales' detected
+   MEDIUM: Use of unapproved performance field 'avgTicket'
+```
+
+**Data Source Verification:**
+```
+📊 Getting VALIDATED scorecard data for John Smith (ID: 123)
+🔗 Fetching advisor scorecard from: http://localhost:5000/api/scorecard/advisor/123
+✅ Successfully retrieved validated advisor scorecard
+```
+
+### **Common Issues & Solutions**
+
+#### **Issue: AI referencing raw spreadsheet data**
+**Solution:** Check that `detectPerformanceIntent()` is properly identifying the query type and routing to scorecard endpoints.
+
+#### **Issue: High violation counts**
+**Solution:** Review AI prompt templates in `ollamaService.js` - ensure they emphasize scorecard API usage only.
+
+#### **Issue: Organizational data mixed with performance**
+**Solution:** Verify `isPerformanceQuery` flag is properly set to prevent organizational queries from accessing performance data.
+
+## 🔄 Data Flow Summary
+
+### **Performance Queries:**
+1. Query → `detectPerformanceIntent()` → `true`
+2. Route to `getValidatedScorecardResponse()`
+3. Call appropriate `/api/scorecard/*` endpoint
+4. Build context with `validated_data` field
+5. Generate AI response with scorecard-only prompts
+6. Validate response against field whitelist
+7. Log violations (if any)
+8. Return response with validation metadata
+
+### **Organizational Queries:**
+1. Query → `detectPerformanceIntent()` → `false`
+2. Route to `analyzeOrganizationalQuery()`
+3. Use database lookups with proper JOINs
+4. Build context with organizational data
+5. Generate AI response (no scorecard validation needed)
+6. Return response
+
+## 📊 Monitoring & Maintenance
+
+### **Regular Monitoring Tasks**
+
+1. **Weekly Violation Review:**
+   - Check `/api/ai-validation/dashboard`
+   - Identify patterns in violated fields
+   - Update forbidden field list if needed
+
+2. **Monthly Scorecard API Health:**
+   - Verify all three scorecard endpoints are responsive
+   - Check validation pass rates
+   - Review false positives/negatives
+
+3. **Quarterly Field Whitelist Review:**
+   - Validate approved fields still match scorecard API schema
+   - Add new fields as scorecard system evolves
+   - Remove deprecated fields
+
+### **Alert Thresholds**
+
+- **Critical:** >10% validation failure rate
+- **High:** New forbidden fields detected in responses
+- **Medium:** Unusual violation patterns by user/query type
+- **Low:** Minor field extraction issues
+
+## 🚀 Future Enhancements
+
+### **Planned Features**
+- Real-time scorecard API schema validation
+- Machine learning-based field pattern detection
+- Automated prompt template optimization based on violation patterns
+- Integration with business intelligence dashboards
+
+### **Extension Points**
+- Additional data source validators (vendor, service catalog)
+- Custom validation rules per user role
+- API rate limiting for scorecard endpoint calls
+- Response caching for frequently requested data
 
 ---
 
-## Next Steps
+## Support & Troubleshooting
 
-1. **Review current prompts** in `/api/config/aiPrompts.js`
-2. **Test with your Ollama models** using the chat interface
-3. **Customize system prompts** for your specific business needs  
-4. **Monitor AI responses** and iterate on prompt effectiveness
-5. **Consider adding new insight types** for specialized analysis
+For issues with the AI agent validation system:
 
-The AI agent is designed to be highly configurable while maintaining the automotive service industry expertise your team needs.
+1. Check console logs for validation messages
+2. Review recent violations via `/api/ai-validation/violations`
+3. Test specific queries with `/api/ai-validation/test`
+4. Verify scorecard API endpoints are accessible
+5. Ensure database migration `07-scorecard-validation-logging.sql` is applied
+
+**Emergency Bypass:** Set `ENABLE_SCORECARD_VALIDATION=false` to temporarily disable validation (not recommended for production).

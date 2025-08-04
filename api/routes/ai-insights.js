@@ -129,8 +129,15 @@ router.post('/chat', async (req, res) => {
       ? ollama.generateEnhancedPrompt(query, context)
       : ollama.generatePerformancePrompt(query, context);
 
-    // Get AI response
-    const aiResponse = await ollama.generateResponse(prompt, model);
+    // Get AI response WITH VALIDATION
+    const aiResponse = await ollama.generateResponse(
+      prompt, 
+      model, 
+      null, // context param
+      targetUserId, // userId for validation
+      query, // original query for validation
+      context // context data for validation
+    );
 
     if (!aiResponse.success) {
       return res.status(500).json({
@@ -139,7 +146,7 @@ router.post('/chat', async (req, res) => {
       });
     }
 
-    res.json({
+    const responseData = {
       query: query,
       response: aiResponse.response,
       context_user: context.user.name,
@@ -147,6 +154,18 @@ router.post('/chat', async (req, res) => {
       context_type: context.business_intelligence ? 'enhanced' : 'basic',
       model_used: aiResponse.model,
       timestamp: new Date().toISOString()
+    };
+
+    // Add validation metadata if available
+    if (aiResponse.validation) {
+      responseData.validation = {
+        status: aiResponse.validation.isValid ? 'passed' : 'failed',
+        violations: aiResponse.validation.violationCount,
+        approved_fields: aiResponse.validation.approvedFieldCount
+      };
+    }
+
+    res.json(responseData);
     });
 
   } catch (error) {

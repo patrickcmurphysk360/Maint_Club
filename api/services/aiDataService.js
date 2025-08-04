@@ -349,9 +349,11 @@ class AIDataService {
   }
 
   /**
+   * DEPRECATED: Use getValidatedScorecardResponse() instead
    * Get performance data from latest MTD spreadsheets
    */
   async getPerformanceData(userId, limit = 3) {
+    console.warn('⚠️ DEPRECATED: getPerformanceData() called. Use getValidatedScorecardResponse() instead.');
     try {
       // Get latest upload per month for this advisor (since spreadsheets are MTD)
       const result = await this.pool.query(`
@@ -387,6 +389,120 @@ class AIDataService {
       console.error('❌ Error getting performance data:', error);
       throw error;
     }
+  }
+
+  /**
+   * Get validated scorecard data using the single source of truth API endpoints
+   * This is the ONLY method that should be used for performance-related queries
+   */
+  async getValidatedScorecardResponse(targetType, targetId, contextUserId = null) {
+    try {
+      console.log(`📊 Getting validated scorecard data: ${targetType}/${targetId}`);
+      
+      const axios = require('axios');
+      const baseURL = process.env.API_BASE_URL || 'http://localhost:5000';
+      
+      let endpoint;
+      let endpointDescription;
+      
+      switch (targetType.toLowerCase()) {
+        case 'advisor':
+        case 'user':
+          endpoint = `${baseURL}/api/scorecard/advisor/${targetId}`;
+          endpointDescription = `advisor scorecard for user ID ${targetId}`;
+          break;
+        case 'store':
+          endpoint = `${baseURL}/api/scorecard/store/${targetId}`;
+          endpointDescription = `store scorecard for store ID ${targetId}`;
+          break;
+        case 'market':
+          endpoint = `${baseURL}/api/scorecard/market/${targetId}`;
+          endpointDescription = `market scorecard for market ID ${targetId}`;
+          break;
+        default:
+          throw new Error(`Invalid scorecard target type: ${targetType}. Use 'advisor', 'store', or 'market'.`);
+      }
+
+      console.log(`🔗 Fetching ${endpointDescription} from: ${endpoint}`);
+      
+      const response = await axios.get(endpoint, {
+        timeout: 10000,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data && response.data.success) {
+        console.log(`✅ Successfully retrieved validated ${endpointDescription}`);
+        return {
+          success: true,
+          data: response.data.data,
+          source: 'validated_scorecard_api',
+          endpoint: endpoint,
+          target_type: targetType,
+          target_id: targetId,
+          retrieved_at: new Date().toISOString()
+        };
+      } else {
+        throw new Error(`Invalid response from scorecard API: ${response.data?.message || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error getting validated scorecard response for ${targetType}/${targetId}:`, error.message);
+      return {
+        success: false,
+        error: error.message,
+        source: 'validated_scorecard_api',
+        target_type: targetType,
+        target_id: targetId,
+        retrieved_at: new Date().toISOString()
+      };
+    }
+  }
+
+  /**
+   * Detect if a query is asking for performance-related information
+   */
+  detectPerformanceIntent(query) {
+    if (!query) return false;
+    
+    const lowerQuery = query.toLowerCase();
+    
+    // Performance metrics keywords
+    const performanceKeywords = [
+      'sales', 'revenue', 'performance', 'metrics', 'scorecard', 'score card',
+      'tpp', 'pat', 'fluid attach', 'oil change', 'tire', 'alignment', 'brake',
+      'gross profit', 'gp', 'invoices', 'tickets', 'attach rate',
+      'numbers', 'stats', 'statistics', 'kpi', 'goals', 'targets',
+      'month', 'monthly', 'mtd', 'quarter', 'quarterly', 'year', 'yearly',
+      'how much', 'how many', 'total', 'average', 'percent', 'percentage',
+      'top performer', 'best', 'highest', 'leading', 'ranking'
+    ];
+
+    // Check for performance-related keywords
+    const hasPerformanceKeywords = performanceKeywords.some(keyword => 
+      lowerQuery.includes(keyword)
+    );
+
+    // Check for question patterns about performance
+    const performancePatterns = [
+      /what\s+(?:is|are|were)\s+.+(?:sales|performance|numbers|metrics)/i,
+      /how\s+(?:much|many|well)\s+.+(?:sell|sold|perform|do|did)/i,
+      /show\s+me\s+.+(?:performance|scorecard|metrics|numbers)/i,
+      /.+(?:'s|s')\s+(?:sales|performance|numbers|metrics|scorecard)/i,
+      /(?:total|monthly|yearly)\s+.+(?:sales|revenue|performance)/i
+    ];
+
+    const hasPerformancePattern = performancePatterns.some(pattern => 
+      pattern.test(lowerQuery)
+    );
+
+    const isPerformanceQuery = hasPerformanceKeywords || hasPerformancePattern;
+    
+    if (isPerformanceQuery) {
+      console.log(`🎯 Detected performance intent in query: "${query}"`);
+    }
+    
+    return isPerformanceQuery;
   }
 
   /**
@@ -1381,6 +1497,7 @@ class AIDataService {
 
   /**
    * Build comprehensive context for AI with all business data
+   * IMPORTANT: Uses validated scorecard endpoints for all performance data
    */
   async buildComprehensiveContext(userId, query = null) {
     try {
@@ -1399,86 +1516,69 @@ class AIDataService {
         console.warn('⚠️ Could not get user behavior data:', error.message);
       }
       
-      // Enhanced query analysis - detect if asking about specific person's performance
-      let specificPersonQuery = null;
-      let specificPersonData = null;
+      // CRITICAL: Detect performance intent first
+      const isPerformanceQuery = this.detectPerformanceIntent(query);
       
-      if (query) {
-        const lowerQuery = query.toLowerCase();
+      // Initialize performance data containers
+      let performanceData = null;
+      let specificPersonQuery = null;
+      let specificPersonPerformanceData = null;
+      
+      // PERFORMANCE DATA: Use ONLY validated scorecard endpoints
+      if (isPerformanceQuery) {
+        console.log('🎯 Performance query detected - using validated scorecard endpoints only');
         
-        // Check if asking about specific person's performance or metrics
-        let personPerfMatch = lowerQuery.match(/(?:what\s+(?:is|does|are)|how\s+(?:is|does|are))\s+([a-zA-Z\s]+?)(?:'s|\s+)(?:performance|doing|sales|numbers)/i);
-        
-        // Also check for "how many/much [metric] did [person] sell/have"
-        if (!personPerfMatch) {
-          personPerfMatch = lowerQuery.match(/how\s+(?:many|much)\s+\w+\s+(?:did|does|has)\s+([a-zA-Z\s]+?)\s+(?:sell|have|complete|do)/i);
-        }
-        
-        // Also check for "[person]'s [metric]" pattern - enhanced for retail tires, total metrics, etc.
-        if (!personPerfMatch) {
-          personPerfMatch = lowerQuery.match(/(?:what\s+(?:is|are)\s+)?([a-zA-Z\s]+?)(?:'s|s')\s+(?:total\s+)?(?:retail\s+|monthly\s+|overall\s+)?(?:sales|performance|numbers|alignments|tires?|revenue|metrics|data)/i);
-        }
-        
-        // Check for scorecard-specific queries: "show me [person] scorecard/metrics/breakdown" - handle possessive forms and dates
-        if (!personPerfMatch) {
-          personPerfMatch = lowerQuery.match(/(?:show\s+(?:me\s+)?|give\s+(?:me\s+)?|get\s+(?:me\s+)?)([a-zA-Z\s]+?)(?:s)?\s+(?:[\d\s,]+\s+)?(?:complete\s+)?(?:scorecard|score\s+card|metrics|performance|breakdown|service\s+metrics|full\s+performance)/i);
-        }
-        
-        // Check for "provide [person] scorecard" - handle "provide me with" format and dates
-        if (!personPerfMatch) {
-          personPerfMatch = lowerQuery.match(/(?:provide\s+(?:me\s+(?:with\s+)?)?)\s*([a-zA-Z\s]+?)(?:s)?\s+(?:[\d\s,]+\s+)?(?:complete\s+)?(?:scorecard|score\s+card|metrics|performance|breakdown)/i);
-        }
-        
-        // Check for "all of [person] [metrics]" pattern - fix the capture group
-        if (!personPerfMatch) {
-          personPerfMatch = lowerQuery.match(/(?:all\s+(?:of\s+)?|what\s+are\s+(?:all\s+(?:of\s+)?)?)\s*([a-zA-Z\s]+?)\s+(?:service\s+)?(?:metrics|numbers|performance|sales)/i);
-        }
-        
-        // Check for "[person] tire sales, alignments, and other services" pattern
-        if (!personPerfMatch) {
-          personPerfMatch = lowerQuery.match(/(?:show\s+)?([a-zA-Z\s]+?)\s+(?:tire\s+sales|alignments|services)/i);
-        }
-        
-        // Check for simple "[person] [performance terms]" pattern
-        if (!personPerfMatch) {
-          personPerfMatch = lowerQuery.match(/^([a-zA-Z\s]+?)\s+(?:performance|scorecard|score\s+card|metrics|sales|data)\b/i);
-        }
-        if (personPerfMatch) {
-          let personName = personPerfMatch[1].trim();
+        // Check if asking about specific person's performance
+        if (query) {
+          const lowerQuery = query.toLowerCase();
           
-          // Clean up possessive forms and common variations
-          personName = personName.replace(/\b(akeem|akiem)\b/gi, 'akeen'); // Handle spelling variations first
+          // Check for person-specific performance patterns
+          let personPerfMatch = lowerQuery.match(/(?:what\s+(?:is|does|are)|how\s+(?:is|does|are))\s+([a-zA-Z\s]+?)(?:'s|\s+)(?:performance|doing|sales|numbers)/i);
           
-          // Remove date-related words FIRST (months, years, "mtd", etc.)
-          personName = personName.replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi, '');
-          personName = personName.replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/gi, '');
-          personName = personName.replace(/\b(20\d{2}|19\d{2})\b/g, ''); // Remove years
-          personName = personName.replace(/\b(mtd|month|quarterly|yearly)\b/gi, '');
-          personName = personName.trim().replace(/\s+/g, ' '); // Clean up extra spaces
-          
-          // THEN handle possessive forms after dates are removed
-          if (personName.endsWith('ns') && !personName.endsWith('sons') && !personName.endsWith('mans')) {
-            personName = personName.replace(/ns$/, 'n'); // "jacksons" -> "jackson"
-          } else if (personName.endsWith('s') && !personName.endsWith('ss')) {
-            personName = personName.replace(/s$/, ''); // Generic possessive cleanup
+          if (!personPerfMatch) {
+            personPerfMatch = lowerQuery.match(/(?:show\s+(?:me\s+)?|give\s+(?:me\s+)?|get\s+(?:me\s+)?)([a-zA-Z\s]+?)(?:s)?\s+(?:[\d\s,]+\s+)?(?:complete\s+)?(?:scorecard|score\s+card|metrics|performance|breakdown)/i);
           }
           
-          console.log(`🔍 Detected specific person performance query for: "${personName}"`);
+          if (!personPerfMatch) {
+            personPerfMatch = lowerQuery.match(/([a-zA-Z\s]+?)(?:'s|s')\s+(?:total\s+)?(?:retail\s+|monthly\s+|overall\s+)?(?:sales|performance|numbers|alignments|tires?|revenue|metrics|data)/i);
+          }
           
-          try {
-            // Search for the person
-            const personResults = await this.searchUsers(personName, 'name');
-            if (personResults.length > 0) {
-              const personId = personResults[0].id;
-              console.log(`📊 Getting performance data for ${personResults[0].first_name} ${personResults[0].last_name} (ID: ${personId})`);
-              
-              // Get their performance data instead of the requesting user's data
-              specificPersonQuery = personName;
-              specificPersonData = await this.getPerformanceData(personId, 3);
+          if (personPerfMatch) {
+            let personName = personPerfMatch[1].trim();
+            
+            // Clean up name variations
+            personName = personName.replace(/\b(akeem|akiem)\b/gi, 'akeen');
+            personName = personName.replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi, '');
+            personName = personName.replace(/\b(20\d{2}|19\d{2})\b/g, '');
+            personName = personName.replace(/\b(mtd|month|quarterly|yearly)\b/gi, '');
+            personName = personName.trim().replace(/\s+/g, ' ');
+            
+            if (personName.endsWith('s') && !personName.endsWith('ss')) {
+              personName = personName.replace(/s$/, '');
             }
-          } catch (error) {
-            console.warn('⚠️ Could not get specific person performance:', error.message);
+            
+            console.log(`🔍 Detected specific person performance query for: "${personName}"`);
+            
+            try {
+              const personResults = await this.searchUsers(personName, 'name');
+              if (personResults.length > 0) {
+                const personId = personResults[0].id;
+                console.log(`📊 Getting VALIDATED scorecard data for ${personResults[0].first_name} ${personResults[0].last_name} (ID: ${personId})`);
+                
+                specificPersonQuery = personName;
+                // Use VALIDATED scorecard endpoint instead of raw performance data
+                specificPersonPerformanceData = await this.getValidatedScorecardResponse('advisor', personId, userId);
+              }
+            } catch (error) {
+              console.warn('⚠️ Could not get specific person scorecard:', error.message);
+            }
           }
+        }
+        
+        // Get performance data for the requesting user using VALIDATED scorecard endpoint
+        if (!specificPersonPerformanceData) {
+          console.log(`📊 Getting VALIDATED scorecard data for requesting user (ID: ${userId})`);
+          performanceData = await this.getValidatedScorecardResponse('advisor', userId, userId);
         }
       }
 
@@ -1536,9 +1636,9 @@ class AIDataService {
         }
       }
       
-      // Check if this is an organizational query (ONLY if not a top performer query)
+      // Check if this is an organizational query (ONLY if not a performance or top performer query)
       let organizationalData = null;
-      if (query && !isTopPerformerQuery) {
+      if (query && !isTopPerformerQuery && !isPerformanceQuery) {
         try {
           organizationalData = await this.analyzeOrganizationalQuery(query, userId);
         } catch (error) {
@@ -1546,8 +1646,8 @@ class AIDataService {
         }
       }
       
-      // Get performance data (use specific person's data if asking about someone else)
-      const performanceData = specificPersonData || await this.getPerformanceData(userId, 3);
+      // SAFEGUARD: Do NOT use getPerformanceData() for performance queries
+      // All performance data now comes from validated scorecard endpoints
       
       // Get goals
       const goalsData = await this.getGoalsData(userId);
@@ -1626,12 +1726,17 @@ class AIDataService {
           store: userData.store_name || userData.store
         },
         performance: {
-          recent_data: performanceData,
-          latest: performanceData[0]?.data || {},
-          timeframe: performanceData[0]?.upload_date || null,
+          // Use validated scorecard data when available
+          validated_data: specificPersonPerformanceData || performanceData,
+          is_performance_query: isPerformanceQuery,
           is_specific_person_query: !!specificPersonQuery,
           specific_person_name: specificPersonQuery,
-          store_name: performanceData[0]?.store_name || null
+          data_source: 'validated_scorecard_api',
+          // Legacy fields for backward compatibility (but marked as deprecated)
+          recent_data: [], // DEPRECATED: Use validated_data instead
+          latest: {}, // DEPRECATED: Use validated_data instead
+          timeframe: null, // DEPRECATED: Use validated_data.retrieved_at instead
+          store_name: null // DEPRECATED: Use user context instead
         },
         goals: goalsData,
         organizational: {
