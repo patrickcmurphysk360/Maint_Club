@@ -334,10 +334,37 @@ class OllamaService {
 **PERFORMANCE DATA:**`;
 
       if (context.performance?.latest && Object.keys(context.performance.latest).length > 0) {
-        const perfData = DATA_FORMATTERS.formatPerformanceData(context.performance.latest);
-        contextInfo += `
+        if (context.performance.is_specific_person_query) {
+          contextInfo += `
+**SPECIFIC PERSON PERFORMANCE: ${context.performance.specific_person_name?.toUpperCase() || 'UNKNOWN'}**
+Store: ${context.performance.store_name || 'Unknown'}
+Period: ${context.performance.timeframe ? new Date(context.performance.timeframe).toLocaleDateString() : 'Unknown'}`;
+          
+          const latest = context.performance.latest;
+          contextInfo += `
+- Sales: $${latest.sales?.toLocaleString() || 'N/A'}
+- GP Sales: $${latest.gpSales?.toLocaleString() || 'N/A'} (${latest.gpPercent || 'N/A'}%)
+- Invoices: ${latest.invoices || 'N/A'}
+- Alignments: ${latest.alignments || 'N/A'}
+- Oil Changes: ${latest.oilChange || 'N/A'}
+- Retail Tires: ${latest.retailTires || 'N/A'}`;
+
+          if (context.performance.recent_data && context.performance.recent_data.length > 1) {
+            contextInfo += `
+
+**RECENT PERFORMANCE HISTORY:**`;
+            context.performance.recent_data.slice(1, 4).forEach((record, index) => {
+              const date = new Date(record.upload_date).toLocaleDateString();
+              contextInfo += `
+${date} (${record.store_name}): $${record.data.sales?.toLocaleString() || 'N/A'} sales, ${record.data.gpPercent || 'N/A'}% GP`;
+            });
+          }
+        } else {
+          const perfData = DATA_FORMATTERS.formatPerformanceData(context.performance.latest);
+          contextInfo += `
 ${perfData}
 - Data Period: ${context.performance.timeframe || 'Unknown'}`;
+        }
       } else {
         contextInfo += `
 - No recent performance data available`;
@@ -370,7 +397,8 @@ ${goalsSection}`;
           });
         }
 
-        if (bi.market_performance && bi.market_performance.length > 0) {
+        // Only show market performance data if NOT a specific person query (to avoid confusion)
+        if (bi.market_performance && bi.market_performance.length > 0 && !context.performance?.is_specific_person_query) {
           contextInfo += `
 
 **MARKET PERFORMANCE DATA (Latest MTD Spreadsheet):**`;
@@ -524,13 +552,19 @@ ${contextInfo}
 **USER QUERY:** ${query}
 
 IMPORTANT GUIDELINES:
-1. **Organizational Questions**: When asked about "who works at", "employees at", "staff at", or similar queries, use the ORGANIZATIONAL QUERY RESULTS section above to provide specific, accurate information about employees and their roles/assignments.
+1. **Top Performer Queries**: When asked about "top advisors", "best performers", "highest", etc., use the TOP PERFORMERS section above to provide specific rankings with names, stores, and performance metrics.
 
-2. **Performance Data**: All performance data comes from the latest MTD (month-to-date) spreadsheet for each time period. When asked about monthly sales/performance, use the final MTD totals from the last upload of that month.
+2. **Organizational Questions**: When asked about "who works at", "employees at", "staff at", or similar queries, use the ORGANIZATIONAL QUERY RESULTS section above to provide specific, accurate information about employees and their roles/assignments.
 
-3. **People Recognition**: Always use full names and specific roles when referring to employees. Include their store and market assignments when relevant.
+3. **Performance Data**: All performance data comes from the latest MTD (month-to-date) spreadsheet for each time period. When asked about monthly sales/performance, use the final MTD totals from the last upload of that month.
 
-${context.organizational?.is_org_query ? 
+4. **People Recognition**: Always use full names and specific roles when referring to employees. Include their store and market assignments when relevant.
+
+${context.performance?.is_specific_person_query ? 
+`**SPECIAL INSTRUCTION FOR ADMIN**: This is a query about a specific person's performance. Provide a direct, objective summary of the performance data shown above. Focus on key metrics without unnecessary narrative. Use bullet points for clarity.` :
+context.benchmarking?.is_top_performer_query ? 
+`**SPECIAL INSTRUCTION**: This is a top performer query. Focus your response on the rankings and performance metrics found in the TOP PERFORMERS section. Provide specific names, stores, and performance numbers.` :
+context.organizational?.is_org_query ? 
 `**SPECIAL INSTRUCTION**: This appears to be an organizational query. Focus your response on the employee information found in the ORGANIZATIONAL QUERY RESULTS section. Provide clear, specific details about who works where and in what role.` :
 `Provide detailed, data-driven insights based on all available information. Reference specific metrics, compare to goals, and provide actionable recommendations.`}`;
 

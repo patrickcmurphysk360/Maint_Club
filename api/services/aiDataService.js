@@ -962,6 +962,68 @@ class AIDataService {
   }
 
   /**
+   * Get store history for a specific user and timeframe using performance data
+   */
+  async getUserStoreHistoryByTimeframe(userName, month, year) {
+    try {
+      // First find the user
+      const userResult = await this.pool.query(`
+        SELECT u.id, u.first_name, u.last_name, u.role
+        FROM users u
+        WHERE LOWER(u.first_name || ' ' || u.last_name) LIKE LOWER($1)
+          AND u.status = 'active'
+        LIMIT 1
+      `, [`%${userName}%`]);
+
+      if (userResult.rows.length === 0) {
+        return null;
+      }
+
+      const user = userResult.rows[0];
+
+      // Get stores worked at during the specific timeframe from performance_data
+      const result = await this.pool.query(`
+        SELECT DISTINCT
+          pd.store_id,
+          s.name as store_name,
+          s.city,
+          s.state,
+          m.name as market_name,
+          COUNT(pd.id) as record_count,
+          MIN(pd.upload_date) as first_date,
+          MAX(pd.upload_date) as last_date
+        FROM performance_data pd
+        LEFT JOIN stores s ON pd.store_id = s.id
+        LEFT JOIN markets m ON s.market_id = m.id
+        WHERE pd.advisor_user_id = $1
+          AND EXTRACT(YEAR FROM pd.upload_date) = $2
+          AND EXTRACT(MONTH FROM pd.upload_date) = $3
+        GROUP BY pd.store_id, s.name, s.city, s.state, m.name
+        ORDER BY record_count DESC, s.name
+      `, [user.id, year, month]);
+
+      // Format the results to include user info
+      return result.rows.map(row => ({
+        id: user.id,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        role: user.role,
+        store_name: row.store_name,
+        city: row.city,
+        state: row.state,
+        market_name: row.market_name,
+        performance_records: row.record_count,
+        first_record: row.first_date,
+        last_record: row.last_date,
+        timeframe: `${month}/${year}`
+      }));
+    } catch (error) {
+      console.error('❌ Error getting user store history by timeframe:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Analyze query to detect organizational questions and extract relevant data
    */
   async analyzeOrganizationalQuery(query, userId) {
@@ -1000,6 +1062,13 @@ class AIDataService {
       storeHistoryMatches = lowerQuery.match(/where.*(has|have)\s+([a-zA-Z\s]+)\s+work/);
     }
     if (!storeHistoryMatches) {
+      // Try "what stores did X work at during [timeframe]" pattern
+      storeHistoryMatches = lowerQuery.match(/what stores\s+(?:did|does)\s+([a-zA-Z\s]+?)\s+work\s+at(?:\s+during|\s+in)?/);
+      if (storeHistoryMatches) {
+        storeHistoryMatches = [null, null, storeHistoryMatches[1]]; // Adjust array structure
+      }
+    }
+    if (!storeHistoryMatches) {
       // Try "show me X store history" pattern
       storeHistoryMatches = lowerQuery.match(/show me\s+([a-zA-Z\s]+)\s+store\s+history/);
       if (storeHistoryMatches) {
@@ -1010,8 +1079,35 @@ class AIDataService {
       let name = storeHistoryMatches[2].trim();
       // Clean up the name (remove "from tire south" type suffixes)
       name = name.replace(/\s+from\s+.*$/, '');
-      console.log(`🔍 Detected store history query for: "${name}"`);
-      return await this.getUserStoreHistory(name);
+      
+      // Extract timeframe from the original query
+      let targetMonth = null;
+      let targetYear = null;
+      if (lowerQuery.includes('july')) targetMonth = 7;
+      else if (lowerQuery.includes('august')) targetMonth = 8;
+      else if (lowerQuery.includes('september')) targetMonth = 9;
+      else if (lowerQuery.includes('june')) targetMonth = 6;
+      
+      const yearMatch = lowerQuery.match(/20\d{2}/);
+      if (yearMatch) targetYear = parseInt(yearMatch[0]);
+      
+      if (targetMonth && targetYear) {
+        console.log(`🔍 Detected store history query for: "${name}" during ${targetMonth}/${targetYear}`);
+        return await this.getUserStoreHistoryByTimeframe(name, targetMonth, targetYear);
+      } else {
+        console.log(`🔍 Detected store history query for: "${name}"`);
+        return await this.getUserStoreHistory(name);
+      }
+    }
+    
+    // Detect store manager queries BEFORE general name searches
+    const storeManagerMatches = lowerQuery.match(/(?:who\s+(?:is\s+(?:the\s+)?)?|what\s+(?:is\s+(?:the\s+)?)?)\s*(?:store\s+)?manager\s+(?:of\s+|at\s+|for\s+)?([a-zA-Z\s]+)/i);
+    if (storeManagerMatches) {
+      const storeName = storeManagerMatches[1].trim();
+      // Remove "store" suffix if present
+      const cleanStoreName = storeName.replace(/\s+store$/i, '');
+      console.log(`🔍 Detected store manager query for: "${cleanStoreName}"`);
+      return await this.getStoreManager(cleanStoreName);
     }
     
     // Detect name searches
@@ -1023,6 +1119,38 @@ class AIDataService {
     }
     
     return null; // No organizational query detected
+  }
+
+  /**
+   * Get store manager for a specific store
+   */
+  async getStoreManager(storeName) {
+    try {
+      const result = await this.pool.query(`
+        SELECT DISTINCT
+          u.id,
+          u.first_name,
+          u.last_name,
+          u.role,
+          s.name as store_name,
+          s.city,
+          s.state,
+          m.name as market_name
+        FROM users u
+        JOIN user_store_assignments usa ON u.id::text = usa.user_id
+        JOIN stores s ON usa.store_id::integer = s.id
+        LEFT JOIN markets m ON s.market_id = m.id
+        WHERE LOWER(s.name) LIKE LOWER($1)
+          AND u.role = 'store_manager'
+          AND u.status = 'active'
+        ORDER BY u.last_name, u.first_name
+      `, [`%${storeName}%`]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error getting store manager:', error);
+      throw error;
+    }
   }
 
   /**
@@ -1078,6 +1206,9 @@ class AIDataService {
         'revenue': 'sales',
         'gp': 'gpPercent',
         'gross profit': 'gpPercent',
+        'gpSales': 'gpSales',
+        'gp sales': 'gpSales',
+        'gross profit sales': 'gpSales',
         'alignments': 'alignments',
         'brake service': 'brakeService',
         'brakes': 'brakeService'
@@ -1221,9 +1352,146 @@ class AIDataService {
         console.warn('⚠️ Could not get user behavior data:', error.message);
       }
       
-      // Check if this is an organizational query and get specific data
-      let organizationalData = null;
+      // Enhanced query analysis - detect if asking about specific person's performance
+      let specificPersonQuery = null;
+      let specificPersonData = null;
+      
       if (query) {
+        const lowerQuery = query.toLowerCase();
+        
+        // Check if asking about specific person's performance or metrics
+        let personPerfMatch = lowerQuery.match(/(?:what\s+(?:is|does|are)|how\s+(?:is|does|are))\s+([a-zA-Z\s]+?)(?:'s|\s+)(?:performance|doing|sales|numbers)/i);
+        
+        // Also check for "how many/much [metric] did [person] sell/have"
+        if (!personPerfMatch) {
+          personPerfMatch = lowerQuery.match(/how\s+(?:many|much)\s+\w+\s+(?:did|does|has)\s+([a-zA-Z\s]+?)\s+(?:sell|have|complete|do)/i);
+        }
+        
+        // Also check for "[person]'s [metric]" pattern - enhanced for retail tires, total metrics, etc.
+        if (!personPerfMatch) {
+          personPerfMatch = lowerQuery.match(/(?:what\s+(?:is|are)\s+)?([a-zA-Z\s]+?)(?:'s|s')\s+(?:total\s+)?(?:retail\s+|monthly\s+|overall\s+)?(?:sales|performance|numbers|alignments|tires?|revenue|metrics|data)/i);
+        }
+        
+        // Check for scorecard-specific queries: "show me [person] scorecard/metrics/breakdown" - handle possessive forms and dates
+        if (!personPerfMatch) {
+          personPerfMatch = lowerQuery.match(/(?:show\s+(?:me\s+)?|give\s+(?:me\s+)?|get\s+(?:me\s+)?)([a-zA-Z\s]+?)(?:s)?\s+(?:[\d\s,]+\s+)?(?:complete\s+)?(?:scorecard|score\s+card|metrics|performance|breakdown|service\s+metrics|full\s+performance)/i);
+        }
+        
+        // Check for "provide [person] scorecard" - handle "provide me with" format and dates
+        if (!personPerfMatch) {
+          personPerfMatch = lowerQuery.match(/(?:provide\s+(?:me\s+(?:with\s+)?)?)\s*([a-zA-Z\s]+?)(?:s)?\s+(?:[\d\s,]+\s+)?(?:complete\s+)?(?:scorecard|score\s+card|metrics|performance|breakdown)/i);
+        }
+        
+        // Check for "all of [person] [metrics]" pattern - fix the capture group
+        if (!personPerfMatch) {
+          personPerfMatch = lowerQuery.match(/(?:all\s+(?:of\s+)?|what\s+are\s+(?:all\s+(?:of\s+)?)?)\s*([a-zA-Z\s]+?)\s+(?:service\s+)?(?:metrics|numbers|performance|sales)/i);
+        }
+        
+        // Check for "[person] tire sales, alignments, and other services" pattern
+        if (!personPerfMatch) {
+          personPerfMatch = lowerQuery.match(/(?:show\s+)?([a-zA-Z\s]+?)\s+(?:tire\s+sales|alignments|services)/i);
+        }
+        
+        // Check for simple "[person] [performance terms]" pattern
+        if (!personPerfMatch) {
+          personPerfMatch = lowerQuery.match(/^([a-zA-Z\s]+?)\s+(?:performance|scorecard|score\s+card|metrics|sales|data)\b/i);
+        }
+        if (personPerfMatch) {
+          let personName = personPerfMatch[1].trim();
+          
+          // Clean up possessive forms and common variations
+          personName = personName.replace(/\b(akeem|akiem)\b/gi, 'akeen'); // Handle spelling variations first
+          
+          // Remove date-related words FIRST (months, years, "mtd", etc.)
+          personName = personName.replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi, '');
+          personName = personName.replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/gi, '');
+          personName = personName.replace(/\b(20\d{2}|19\d{2})\b/g, ''); // Remove years
+          personName = personName.replace(/\b(mtd|month|quarterly|yearly)\b/gi, '');
+          personName = personName.trim().replace(/\s+/g, ' '); // Clean up extra spaces
+          
+          // THEN handle possessive forms after dates are removed
+          if (personName.endsWith('ns') && !personName.endsWith('sons') && !personName.endsWith('mans')) {
+            personName = personName.replace(/ns$/, 'n'); // "jacksons" -> "jackson"
+          } else if (personName.endsWith('s') && !personName.endsWith('ss')) {
+            personName = personName.replace(/s$/, ''); // Generic possessive cleanup
+          }
+          
+          console.log(`🔍 Detected specific person performance query for: "${personName}"`);
+          
+          try {
+            // Search for the person
+            const personResults = await this.searchUsers(personName, 'name');
+            if (personResults.length > 0) {
+              const personId = personResults[0].id;
+              console.log(`📊 Getting performance data for ${personResults[0].first_name} ${personResults[0].last_name} (ID: ${personId})`);
+              
+              // Get their performance data instead of the requesting user's data
+              specificPersonQuery = personName;
+              specificPersonData = await this.getPerformanceData(personId, 3);
+            }
+          } catch (error) {
+            console.warn('⚠️ Could not get specific person performance:', error.message);
+          }
+        }
+      }
+
+      // Enhanced top performers detection (do this BEFORE organizational query analysis)
+      let topPerformersData = null;
+      let isTopPerformerQuery = false;
+      
+      if (query) {
+        const lowerQuery = query.toLowerCase();
+        
+        // Detect top performer queries with various patterns - PRIORITY CHECK
+        if (lowerQuery.match(/top\s+(\w+\s+)?(advisor|employee|performer|people)/i) ||
+            lowerQuery.match(/(best|highest|leading)\s+(advisor|employee|performer)/i) ||
+            lowerQuery.match(/who\s+(are\s+the\s+)?(top|best|highest)/i) ||
+            lowerQuery.match(/what\s+advisor\s+has\s+the\s+(highest|most|best|top)/i)) {
+          
+          isTopPerformerQuery = true;
+          
+          // Extract metric from query
+          let metric = 'sales'; // default
+          if (lowerQuery.includes('tire')) metric = 'retailTires';
+          else if (lowerQuery.includes('oil')) metric = 'oilChange';
+          else if (lowerQuery.includes('brake')) metric = 'brakeService';
+          else if (lowerQuery.includes('alignment')) metric = 'alignments';
+          else if (lowerQuery.includes('gross profit') || lowerQuery.includes('gp sales')) metric = 'gpSales';
+          else if (lowerQuery.includes('sales') || lowerQuery.includes('revenue')) metric = 'sales';
+          
+          // Extract number of results requested
+          const numberMatch = lowerQuery.match(/top\s+(\d+)/);
+          const limit = numberMatch ? parseInt(numberMatch[1]) : 5;
+          
+          // Check if month is specified in query
+          let targetMonth = new Date().getMonth() + 1;
+          let targetYear = new Date().getFullYear();
+          
+          if (lowerQuery.includes('august')) targetMonth = 8;
+          else if (lowerQuery.includes('july')) targetMonth = 7;
+          else if (lowerQuery.includes('september')) targetMonth = 9;
+          else if (lowerQuery.includes('october')) targetMonth = 10;
+          
+          console.log(`🎯 Detected top performer query: top ${limit} ${metric} performers for ${targetMonth}/${targetYear}`);
+          
+          try {
+            topPerformersData = await this.getTopPerformers(
+              metric, 
+              userData.market_name || 'Tire South - Tekmetric',
+              targetMonth,
+              targetYear,
+              limit
+            );
+            console.log(`🏆 Found ${topPerformersData.length} top performers for ${metric}`);
+          } catch (error) {
+            console.error('⚠️ Could not get top performers:', error.message);
+          }
+        }
+      }
+      
+      // Check if this is an organizational query (ONLY if not a top performer query)
+      let organizationalData = null;
+      if (query && !isTopPerformerQuery) {
         try {
           organizationalData = await this.analyzeOrganizationalQuery(query, userId);
         } catch (error) {
@@ -1231,8 +1499,8 @@ class AIDataService {
         }
       }
       
-      // Get performance data
-      const performanceData = await this.getPerformanceData(userId, 3);
+      // Get performance data (use specific person's data if asking about someone else)
+      const performanceData = specificPersonData || await this.getPerformanceData(userId, 3);
       
       // Get goals
       const goalsData = await this.getGoalsData(userId);
@@ -1241,15 +1509,33 @@ class AIDataService {
       const marketPerformanceData = userData.market_id ? 
         await this.getMarketPerformanceData(userData.market_id) : [];
       
-      // Get full market and store data
-      const marketData = userData.market_id ? 
-        await this.getMarketData(userData.market_id) : [];
-      
-      const storeData = userData.store_id ? 
-        await this.getStoreData(userData.store_id) : [];
-      
-      // Get organizational structure for context
+      // Get full market and store data with error handling
+      let marketData = [];
+      let storeData = [];
       let orgStructureData = [];
+      
+      try {
+        marketData = userData.market_id ? 
+          await this.getMarketData(userData.market_id) : [];
+      } catch (error) {
+        console.warn('⚠️ Could not get market data:', error.message);
+        marketData = userData.market_id ? [{ 
+          id: userData.market_id, 
+          name: userData.market_name 
+        }] : [];
+      }
+      
+      try {
+        storeData = userData.store_id ? 
+          await this.getStoreData(userData.store_id) : [];
+      } catch (error) {
+        console.warn('⚠️ Could not get store data:', error.message);
+        storeData = userData.store_id ? [{ 
+          id: userData.store_id, 
+          name: userData.store_name 
+        }] : [];
+      }
+      
       try {
         orgStructureData = await this.getOrganizationalStructure(userData.market_id);
       } catch (error) {
@@ -1285,41 +1571,6 @@ class AIDataService {
         console.warn('⚠️ Could not get peer data:', error.message);
       }
 
-      // Check if query is asking for top performers
-      let topPerformersData = null;
-      if (query && query.toLowerCase().includes('top') && query.toLowerCase().match(/tire|sales|oil|brake|alignment/)) {
-        // Extract metric from query
-        let metric = 'sales';
-        if (query.toLowerCase().includes('tire')) metric = 'retailTires';
-        else if (query.toLowerCase().includes('oil')) metric = 'oilChange';
-        else if (query.toLowerCase().includes('brake')) metric = 'brakeService';
-        else if (query.toLowerCase().includes('alignment')) metric = 'alignments';
-        
-        // Check if month is specified in query
-        let targetMonth = new Date().getMonth() + 1;
-        let targetYear = new Date().getFullYear();
-        
-        if (query.toLowerCase().includes('august')) {
-          targetMonth = 8;
-        } else if (query.toLowerCase().includes('july')) {
-          targetMonth = 7;
-        }
-        
-        console.log(`🎯 Looking for top ${metric} performers for ${targetMonth}/${targetYear}`);
-        
-        try {
-          topPerformersData = await this.getTopPerformers(
-            metric, 
-            userData.market_name || 'Tire South - Tekmetric',
-            targetMonth,
-            targetYear,
-            5
-          );
-          console.log(`🏆 Found ${topPerformersData.length} top performers for ${metric}`);
-        } catch (error) {
-          console.error('⚠️ Could not get top performers:', error.message);
-        }
-      }
 
       const context = {
         user: {
@@ -1330,7 +1581,10 @@ class AIDataService {
         performance: {
           recent_data: performanceData,
           latest: performanceData[0]?.data || {},
-          timeframe: performanceData[0]?.upload_date || null
+          timeframe: performanceData[0]?.upload_date || null,
+          is_specific_person_query: !!specificPersonQuery,
+          specific_person_name: specificPersonQuery,
+          store_name: performanceData[0]?.store_name || null
         },
         goals: goalsData,
         organizational: {
@@ -1356,7 +1610,8 @@ class AIDataService {
         },
         benchmarking: {
           peers: peerData,
-          top_performers: topPerformersData
+          top_performers: topPerformersData,
+          is_top_performer_query: isTopPerformerQuery
         },
         query_context: query
       };

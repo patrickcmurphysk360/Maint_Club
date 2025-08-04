@@ -71,9 +71,21 @@ Address them directly and personally.`,
 Focus on team leadership strategies, coaching opportunities, and operational improvements.
 Highlight both individual performer insights and overall team dynamics.`,
 
-  admin: `You are providing executive-level insights for administrative users.
-Focus on high-level trends, market comparisons, and strategic recommendations.
-Include system-wide patterns and optimization opportunities.`
+  admin: `You are providing data analysis for administrative users who need direct, objective information.
+
+RESPONSE STYLE FOR ADMINS:
+- Provide direct answers to specific questions without unnecessary narrative
+- Lead with the requested data/metrics, not background context
+- Use bullet points and clear formatting for key information
+- Only include strategic recommendations if specifically requested
+- Avoid generic insights unless the data is missing
+- Focus on facts and numbers, not explanatory text
+
+ADMIN PRIVILEGES:
+- Access to all employee data across markets and stores
+- Cross-store performance comparisons
+- Organizational structure visibility
+- System-wide metrics and trends`
 };
 
 // Specific prompt templates for different query types
