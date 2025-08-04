@@ -16,6 +16,13 @@ class AIValidationMiddleware {
     this.pool = pool;
     this.validator = new ScorecardFieldValidator(pool);
     
+    // Forbidden terms that indicate raw data usage
+    this.forbiddenTerms = [
+      'spreadsheet', 'excel', 'csv', 'raw_data', 'rawData', 'uploadedData',
+      'mtd_sales', 'mtdSales', 'monthToDate', 'calculatedTPP', 'inferredPAT',
+      'approximateFluidAttach', 'estimatedAttachRate', 'spreadsheetData'
+    ];
+
     // Performance metrics that require numerical validation
     this.numericMetrics = {
       'sales': { tolerance: 0.01, type: 'currency' },
@@ -86,13 +93,25 @@ class AIValidationMiddleware {
         const expectedData = await this.fetchExpectedValues(entityInfo);
         validationResult.expectedValues = expectedData;
         
+        // Check for forbidden terms first
+        const forbiddenTermsFound = this.checkForbiddenTerms(aiResponse);
+        if (forbiddenTermsFound.length > 0) {
+          validationResult.isValid = false;
+          validationResult.mismatches.push({
+            type: 'forbidden_terms',
+            severity: 'high',
+            message: `Forbidden terms detected: ${forbiddenTermsFound.join(', ')}`,
+            terms: forbiddenTermsFound
+          });
+        }
+
         // Extract metrics from AI response
         const detectedMetrics = this.extractMetricsFromResponse(aiResponse);
         validationResult.detectedValues = detectedMetrics;
         
         // Compare values and detect mismatches
         const mismatches = this.compareMetrics(expectedData, detectedMetrics);
-        validationResult.mismatches = mismatches;
+        validationResult.mismatches.push(...mismatches);
         
         if (mismatches.length > 0) {
           validationResult.isValid = false;
@@ -139,6 +158,22 @@ class AIValidationMiddleware {
       
       return errorResult;
     }
+  }
+
+  /**
+   * Check AI response for forbidden terms that indicate raw data usage
+   */
+  checkForbiddenTerms(responseText) {
+    const lowerResponse = responseText.toLowerCase();
+    const foundTerms = [];
+    
+    for (const term of this.forbiddenTerms) {
+      if (lowerResponse.includes(term.toLowerCase())) {
+        foundTerms.push(term);
+      }
+    }
+    
+    return foundTerms;
   }
 
   /**
