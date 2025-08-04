@@ -1456,6 +1456,83 @@ class AIDataService {
       throw error;
     }
   }
+  /**
+   * Get store rankings for AI queries
+   * Supports ranking stores by various performance metrics
+   */
+  async getStoreRankings(metric = 'alignments', month = null, year = null) {
+    try {
+      console.log(`🏆 Getting store rankings by ${metric} for ${month}/${year}`);
+      
+      // Use current month if not specified
+      const currentDate = new Date();
+      const mtdMonth = month || (currentDate.getMonth() + 1);
+      const mtdYear = year || currentDate.getFullYear();
+      
+      // Use the validated scorecard API
+      const { getValidatedScorecardData } = require('../utils/scorecardDataAccess');
+      
+      // For rankings, we need to construct the endpoint differently
+      const apiBaseURL = process.env.API_BASE_URL || 'http://maintenance-club-api:5000';
+      const endpoint = `${apiBaseURL}/api/scorecard/rankings/stores?metric=${metric}&mtdMonth=${mtdMonth}&mtdYear=${mtdYear}`;
+      
+      console.log(`📊 Fetching rankings from: ${endpoint}`);
+      
+      // Generate service token for internal API access
+      const jwt = require('jsonwebtoken');
+      const serviceToken = jwt.sign(
+        { 
+          id: 1, 
+          role: 'admin', 
+          service: 'ai-validation-middleware',
+          internal: true 
+        },
+        process.env.JWT_SECRET || 'fallback_secret',
+        { expiresIn: '5m' }
+      );
+      
+      const axios = require('axios');
+      const response = await axios.get(endpoint, {
+        headers: {
+          'Authorization': `Bearer ${serviceToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.data && response.data.rankings) {
+        console.log(`✅ Retrieved ${response.data.rankings.length} stores in ranking`);
+        return {
+          success: true,
+          data: response.data,
+          source: 'validated_scorecard_api'
+        };
+      } else {
+        throw new Error('No ranking data in response');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error getting store rankings:', error.message);
+      return {
+        success: false,
+        error: error.message,
+        data: null
+      };
+    }
+  }
+
+  /**
+   * Detect if query is asking for store rankings
+   */
+  isStoreRankingQuery(query) {
+    const lowerQuery = query.toLowerCase();
+    const rankingIndicators = [
+      'ranking', 'rank', 'top stores', 'best stores', 
+      'stores by', 'which stores', 'store performance',
+      'compare stores', 'store leaderboard'
+    ];
+    
+    return rankingIndicators.some(indicator => lowerQuery.includes(indicator));
+  }
 }
 
 module.exports = AIDataService;

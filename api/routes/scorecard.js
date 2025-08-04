@@ -1607,4 +1607,243 @@ router.get('/markets', async (req, res) => {
   }
 });
 
+// Store-level scorecard endpoint for validation middleware
+router.get('/store/:storeId', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { storeId } = req.params;
+    const { mtdMonth, mtdYear } = req.query;
+    
+    console.log(`📊 Getting store scorecard for store ${storeId}`);
+    
+    // Get store information
+    const storeResult = await pool.query(`
+      SELECT s.*, m.name as market_name, m.id as market_id
+      FROM stores s
+      LEFT JOIN markets m ON s.market_id = m.id
+      WHERE s.id = $1
+    `, [storeId]);
+    
+    if (storeResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Store not found' });
+    }
+    
+    const store = storeResult.rows[0];
+    
+    // Get all advisors in this store
+    const advisorsResult = await pool.query(`
+      SELECT DISTINCT u.id, u.first_name, u.last_name
+      FROM users u
+      JOIN user_store_assignments usa ON u.id::text = usa.user_id
+      WHERE usa.store_id = $1 AND u.role = 'advisor'
+    `, [storeId]);
+    
+    // Get performance data for the store
+    let performanceQuery = `
+      SELECT 
+        SUM((data->>'sales')::numeric) as total_sales,
+        SUM((data->>'gpSales')::numeric) as total_gp_sales,
+        SUM((data->>'invoices')::numeric) as total_invoices,
+        SUM((data->>'alignments')::numeric) as total_alignments,
+        SUM((data->>'oilChange')::numeric) as total_oil_changes,
+        SUM((data->>'retailTires')::numeric) as total_retail_tires,
+        SUM((data->>'brakeService')::numeric) as total_brake_services
+      FROM performance_data 
+      WHERE store_id = $1::text
+        AND data_type = 'services'
+    `;
+    
+    const queryParams = [storeId];
+    
+    if (mtdMonth && mtdYear) {
+      performanceQuery += ` AND EXTRACT(YEAR FROM upload_date) = $2 AND EXTRACT(MONTH FROM upload_date) = $3`;
+      queryParams.push(parseInt(mtdYear), parseInt(mtdMonth));
+    }
+    
+    const performanceResult = await pool.query(performanceQuery, queryParams);
+    const performanceData = performanceResult.rows[0] || {};
+    
+    // Aggregate store-level metrics
+    const storeMetrics = {
+      totalSales: parseFloat(performanceData.total_sales) || 0,
+      totalGpSales: parseFloat(performanceData.total_gp_sales) || 0,
+      totalInvoices: parseInt(performanceData.total_invoices) || 0,
+      totalAlignments: parseInt(performanceData.total_alignments) || 0,
+      totalOilChanges: parseInt(performanceData.total_oil_changes) || 0,
+      totalRetailTires: parseInt(performanceData.total_retail_tires) || 0,
+      totalBrakeServices: parseInt(performanceData.total_brake_services) || 0,
+      advisorCount: advisorsResult.rows.length,
+      storeName: store.name,
+      marketName: store.market_name
+    };
+    
+    res.json({
+      storeId: parseInt(storeId),
+      period: { mtdMonth, mtdYear },
+      metrics: storeMetrics,
+      advisors: advisorsResult.rows,
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Store scorecard error:', error);
+    res.status(500).json({ message: 'Error generating store scorecard', error: error.message });
+  }
+});
+
+// Market-level scorecard endpoint for validation middleware
+router.get('/market/:marketId', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { marketId } = req.params;
+    const { mtdMonth, mtdYear } = req.query;
+    
+    console.log(`📊 Getting market scorecard for market ${marketId}`);
+    
+    // Get market information
+    const marketResult = await pool.query(`
+      SELECT * FROM markets WHERE id = $1
+    `, [marketId]);
+    
+    if (marketResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Market not found' });
+    }
+    
+    const market = marketResult.rows[0];
+    
+    // Get all stores in this market
+    const storesResult = await pool.query(`
+      SELECT id, name FROM stores WHERE market_id = $1
+    `, [marketId]);
+    
+    // Get all advisors in this market
+    const advisorsResult = await pool.query(`
+      SELECT DISTINCT u.id, u.first_name, u.last_name, s.name as store_name
+      FROM users u
+      JOIN user_market_assignments uma ON u.id::text = uma.user_id
+      LEFT JOIN user_store_assignments usa ON u.id::text = usa.user_id
+      LEFT JOIN stores s ON usa.store_id::integer = s.id
+      WHERE uma.market_id = $1 AND u.role = 'advisor'
+    `, [marketId]);
+    
+    // Aggregate market-level metrics
+    const marketMetrics = {
+      totalSales: 0,
+      totalGpSales: 0,
+      totalInvoices: 0,
+      storeCount: storesResult.rows.length,
+      advisorCount: advisorsResult.rows.length,
+      marketName: market.name
+    };
+    
+    res.json({
+      marketId: parseInt(marketId),
+      period: { mtdMonth, mtdYear },
+      metrics: marketMetrics,
+      stores: storesResult.rows,
+      advisors: advisorsResult.rows,
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Market scorecard error:', error);
+    res.status(500).json({ message: 'Error generating market scorecard', error: error.message });
+  }
+});
+
+// Store rankings endpoint for AI queries
+router.get('/rankings/stores', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { metric = 'alignments', mtdMonth, mtdYear, limit = 10 } = req.query;
+    
+    console.log(`📊 Getting store rankings by ${metric} for ${mtdMonth}/${mtdYear} (using LATEST MTD upload per store)`);
+    
+    // Build the query based on the requested metric
+    // NOTE: Each spreadsheet upload is a Month-To-Date (MTD) snapshot
+    // We need to use ONLY the LATEST upload per store, not sum multiple uploads
+    const metricField = {
+      'alignments': "(latest_data.data->>'alignments')::numeric",
+      'oilChange': "(latest_data.data->>'oilChange')::numeric",
+      'sales': "(latest_data.data->>'sales')::numeric",
+      'invoices': "(latest_data.data->>'invoices')::numeric",
+      'retailTires': "(latest_data.data->>'retailTires')::numeric",
+      'brakeService': "(latest_data.data->>'brakeService')::numeric"
+    };
+    
+    if (!metricField[metric]) {
+      return res.status(400).json({ message: `Invalid metric: ${metric}` });
+    }
+    
+    // Build query that gets ONLY the latest MTD upload per store
+    let query = `
+      WITH latest_uploads AS (
+        SELECT 
+          pd.store_id,
+          pd.data,
+          pd.advisor_user_id,
+          pd.upload_date,
+          ROW_NUMBER() OVER (
+            PARTITION BY pd.store_id 
+            ORDER BY pd.upload_date DESC, pd.id DESC
+          ) as rn
+        FROM performance_data pd
+        WHERE pd.data_type = 'services'
+          AND pd.advisor_user_id IS NULL
+    `;
+    
+    const queryParams = [];
+    
+    if (mtdMonth && mtdYear) {
+      query += ` AND EXTRACT(YEAR FROM pd.upload_date) = $1 AND EXTRACT(MONTH FROM pd.upload_date) = $2`;
+      queryParams.push(parseInt(mtdYear), parseInt(mtdMonth));
+    }
+    
+    query += `
+      ),
+      latest_data AS (
+        SELECT *
+        FROM latest_uploads
+        WHERE rn = 1
+      )
+      SELECT 
+        s.id as store_id,
+        s.name as store_name,
+        m.name as market_name,
+        ${metricField[metric]} as metric_value,
+        1 as advisor_count
+      FROM stores s
+      LEFT JOIN markets m ON s.market_id = m.id
+      LEFT JOIN latest_data ON latest_data.store_id::integer = s.id
+      WHERE latest_data.data IS NOT NULL
+        AND ${metricField[metric]} > 0
+      ORDER BY metric_value DESC
+      LIMIT ${parseInt(limit)}`;
+    
+    const result = await pool.query(query, queryParams);
+    
+    // Format the response
+    const rankings = result.rows.map((row, index) => ({
+      rank: index + 1,
+      storeId: row.store_id,
+      storeName: row.store_name,
+      marketName: row.market_name,
+      metricValue: parseFloat(row.metric_value) || 0,
+      advisorCount: parseInt(row.advisor_count) || 0
+    }));
+    
+    res.json({
+      metric: metric,
+      period: { month: mtdMonth, year: mtdYear },
+      rankings: rankings,
+      totalStores: rankings.length,
+      lastUpdated: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Store rankings error:', error);
+    res.status(500).json({ message: 'Error generating store rankings', error: error.message });
+  }
+});
+
 module.exports = router;

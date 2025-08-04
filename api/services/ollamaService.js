@@ -346,6 +346,47 @@ class OllamaService {
 
     try {
       console.log('🔄 Building enhanced AI context with full business intelligence...');
+      
+      // Check if this is a store ranking query
+      if (query && this.aiDataService.isStoreRankingQuery(query)) {
+        console.log('🏆 Detected store ranking query');
+        
+        // Extract metric from query
+        let metric = 'alignments'; // default
+        const metricMap = {
+          'alignment': 'alignments',
+          'oil change': 'oilChange',
+          'tire': 'retailTires',
+          'brake': 'brakeService'
+        };
+        
+        for (const [keyword, metricName] of Object.entries(metricMap)) {
+          if (query.toLowerCase().includes(keyword)) {
+            metric = metricName;
+            break;
+          }
+        }
+        
+        // Extract month/year from query
+        const monthMatch = query.match(/august|aug|8/i);
+        const yearMatch = query.match(/2025|2024|2023/);
+        const month = monthMatch ? 8 : new Date().getMonth() + 1;
+        const year = yearMatch ? parseInt(yearMatch[0]) : new Date().getFullYear();
+        
+        // Get store rankings
+        const rankingsResult = await this.aiDataService.getStoreRankings(metric, month, year);
+        
+        if (rankingsResult.success) {
+          // Build context with ranking data
+          const context = await this.aiDataService.buildComprehensiveContext(userId, query);
+          context.storeRankings = rankingsResult.data;
+          context.queryType = 'store_rankings';
+          console.log('✅ Enhanced context with store rankings built successfully');
+          return context;
+        }
+      }
+      
+      // Standard context building
       const context = await this.aiDataService.buildComprehensiveContext(userId, query);
       console.log('✅ Enhanced context built successfully');
       return context;
@@ -471,6 +512,27 @@ class OllamaService {
 
   generateEnhancedPrompt(query, context) {
     try {
+      // Handle store ranking queries specially
+      if (context.queryType === 'store_rankings' && context.storeRankings) {
+        const rankings = context.storeRankings;
+        let prompt = `You are asked: "${query}"
+
+VALIDATED SCORECARD DATA - Store Rankings for ${rankings.metric} (${rankings.period.month}/${rankings.period.year}):
+
+`;
+        rankings.rankings.forEach(store => {
+          prompt += `${store.rank}. ${store.storeName} (${store.marketName}): ${store.metricValue} ${rankings.metric} (${store.advisorCount} advisors)\n`;
+        });
+        
+        prompt += `\nTotal stores ranked: ${rankings.totalStores}
+Data source: Official scorecard API endpoints
+Last updated: ${rankings.lastUpdated}
+
+Please provide a clear answer about the store rankings based on this validated scorecard data.`;
+        
+        return prompt;
+      }
+      
       const rolePrompt = DATA_FORMATTERS.getRolePrompt(context.user.role);
       
       // Build comprehensive context information
