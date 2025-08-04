@@ -604,201 +604,29 @@ class AIDataService {
   }
 
   /**
-   * Get peer comparison data for advisor benchmarking
+   * POLICY VIOLATION - PERMANENTLY DISABLED
+   * This method directly accessed performance_data table, violating scorecard API policy
    */
   async getPeerComparison(userId, marketId = null, storeId = null, limit = 10) {
-    try {
-      let peerQuery;
-      let params = [userId];
-
-      if (storeId) {
-        // Compare within same store
-        peerQuery = `
-          WITH user_performance AS (
-            SELECT 
-              pd.advisor_user_id,
-              u.first_name || ' ' || u.last_name as advisor_name,
-              pd.data,
-              pd.upload_date,
-              ROW_NUMBER() OVER (PARTITION BY pd.advisor_user_id ORDER BY pd.upload_date DESC) as rn
-            FROM performance_data pd
-            JOIN users u ON pd.advisor_user_id = u.id
-            JOIN user_store_assignments usa ON u.id::text = usa.user_id
-            WHERE usa.store_id = (
-              SELECT usa2.store_id 
-              FROM user_store_assignments usa2 
-              WHERE usa2.user_id = $1::text
-              LIMIT 1
-            )
-            AND pd.data_type = 'services'
-            AND pd.advisor_user_id != $1
-          )
-          SELECT * FROM user_performance WHERE rn = 1 LIMIT $2
-        `;
-        params.push(limit);
-      } else if (marketId) {
-        // Compare within same market
-        peerQuery = `
-          WITH user_performance AS (
-            SELECT 
-              pd.advisor_user_id,
-              u.first_name || ' ' || u.last_name as advisor_name,
-              pd.data,
-              pd.upload_date,
-              s.name as store_name,
-              ROW_NUMBER() OVER (PARTITION BY pd.advisor_user_id ORDER BY pd.upload_date DESC) as rn
-            FROM performance_data pd
-            JOIN users u ON pd.advisor_user_id = u.id
-            JOIN user_market_assignments uma ON u.id::text = uma.user_id
-            JOIN user_store_assignments usa ON u.id::text = usa.user_id
-            JOIN stores s ON usa.store_id::integer = s.id
-            WHERE uma.market_id = $2::text
-            AND pd.data_type = 'services'
-            AND pd.advisor_user_id != $1
-          )
-          SELECT * FROM user_performance WHERE rn = 1 LIMIT $3
-        `;
-        params.push(marketId.toString(), limit);
-      } else {
-        // Compare across all advisors
-        peerQuery = `
-          WITH user_performance AS (
-            SELECT 
-              pd.advisor_user_id,
-              u.first_name || ' ' || u.last_name as advisor_name,
-              pd.data,
-              pd.upload_date,
-              s.name as store_name,
-              m.name as market_name,
-              ROW_NUMBER() OVER (PARTITION BY pd.advisor_user_id ORDER BY pd.upload_date DESC) as rn
-            FROM performance_data pd
-            JOIN users u ON pd.advisor_user_id = u.id
-            LEFT JOIN user_store_assignments usa ON u.id::text = usa.user_id
-            LEFT JOIN stores s ON usa.store_id::integer = s.id
-            LEFT JOIN markets m ON s.market_id = m.id
-            WHERE pd.data_type = 'services'
-            AND pd.advisor_user_id != $1
-          )
-          SELECT * FROM user_performance WHERE rn = 1 LIMIT $2
-        `;
-        params.push(limit);
-      }
-
-      const result = await this.pool.query(peerQuery, params);
-      return result.rows;
-    } catch (error) {
-      console.error('❌ Error getting peer comparison:', error);
-      throw error;
-    }
+    const error = new Error('POLICY VIOLATION: getPeerComparison() directly accesses performance_data table. This method is permanently disabled. Use scorecard API endpoints instead.');
+    console.error('🚫 POLICY VIOLATION: getPeerComparison() called - this method is permanently disabled');
+    console.error('   Reason: Direct performance_data table access violates scorecard API policy');
+    console.error('   Required: Use /api/scorecard/* endpoints only');
+    console.error(`   Parameters: userId=${userId}, marketId=${marketId}, storeId=${storeId}, limit=${limit}`);
+    throw error;
   }
 
   /**
-   * Get market-level performance from latest MTD spreadsheet
+   * POLICY VIOLATION - PERMANENTLY DISABLED
+   * This method directly accessed performance_data table, violating scorecard API policy
    */
   async getMarketPerformanceData(marketId = null, month = null, year = null) {
-    try {
-      let marketPerfQuery;
-      let params = [];
-
-      if (marketId && month && year) {
-        // Latest MTD spreadsheet for specific market/month/year
-        marketPerfQuery = `
-          WITH latest_upload AS (
-            SELECT MAX(upload_date) as latest_date
-            FROM performance_data pd
-            JOIN stores s ON pd.store_id = s.id
-            JOIN markets m ON s.market_id = m.id
-            WHERE pd.data_type = 'services' 
-              AND m.id = $1
-              AND EXTRACT(MONTH FROM pd.upload_date) = $2
-              AND EXTRACT(YEAR FROM pd.upload_date) = $3
-          )
-          SELECT 
-            m.name as market_name,
-            pd.upload_date,
-            COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
-            SUM((pd.data->>'sales')::int) as total_sales,
-            AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
-            SUM((pd.data->>'invoices')::int) as total_invoices,
-            AVG((pd.data->>'avgSpend')::float) as avg_ticket_size,
-            'latest_mtd' as data_source
-          FROM performance_data pd
-          JOIN stores s ON pd.store_id = s.id
-          JOIN markets m ON s.market_id = m.id
-          JOIN latest_upload lu ON pd.upload_date = lu.latest_date
-          WHERE pd.data_type = 'services' 
-            AND m.id = $1
-            AND EXTRACT(MONTH FROM pd.upload_date) = $2
-            AND EXTRACT(YEAR FROM pd.upload_date) = $3
-          GROUP BY m.name, pd.upload_date
-        `;
-        params = [marketId, month, year];
-      } else if (marketId) {
-        // Latest MTD spreadsheet for specific market
-        marketPerfQuery = `
-          WITH latest_upload AS (
-            SELECT MAX(upload_date) as latest_date
-            FROM performance_data pd
-            JOIN stores s ON pd.store_id = s.id
-            JOIN markets m ON s.market_id = m.id
-            WHERE pd.data_type = 'services' AND m.id = $1
-          )
-          SELECT 
-            m.name as market_name,
-            pd.upload_date,
-            COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
-            SUM((pd.data->>'sales')::int) as total_sales,
-            AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
-            SUM((pd.data->>'invoices')::int) as total_invoices,
-            AVG((pd.data->>'avgSpend')::float) as avg_ticket_size,
-            'latest_mtd' as data_source
-          FROM performance_data pd
-          JOIN stores s ON pd.store_id = s.id
-          JOIN markets m ON s.market_id = m.id
-          JOIN latest_upload lu ON pd.upload_date = lu.latest_date
-          WHERE pd.data_type = 'services' AND m.id = $1
-          GROUP BY m.name, pd.upload_date
-        `;
-        params = [marketId];
-      } else {
-        // Latest MTD spreadsheet for all markets
-        marketPerfQuery = `
-          WITH latest_upload_per_market AS (
-            SELECT 
-              m.id as market_id,
-              MAX(pd.upload_date) as latest_date
-            FROM performance_data pd
-            JOIN stores s ON pd.store_id = s.id
-            JOIN markets m ON s.market_id = m.id
-            WHERE pd.data_type = 'services'
-            GROUP BY m.id
-          )
-          SELECT 
-            m.name as market_name,
-            m.id as market_id,
-            pd.upload_date,
-            COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
-            SUM((pd.data->>'sales')::int) as total_sales,
-            AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
-            SUM((pd.data->>'invoices')::int) as total_invoices,
-            AVG((pd.data->>'avgSpend')::float) as avg_ticket_size,
-            'latest_mtd' as data_source
-          FROM performance_data pd
-          JOIN stores s ON pd.store_id = s.id
-          JOIN markets m ON s.market_id = m.id
-          JOIN latest_upload_per_market lum ON m.id = lum.market_id AND pd.upload_date = lum.latest_date
-          WHERE pd.data_type = 'services'
-          GROUP BY m.name, m.id, pd.upload_date
-          ORDER BY pd.upload_date DESC
-        `;
-      }
-
-      const result = await this.pool.query(marketPerfQuery, params);
-      return result.rows;
-    } catch (error) {
-      console.error('❌ Error getting market performance data:', error);
-      throw error;
-    }
+    const error = new Error('POLICY VIOLATION: getMarketPerformanceData() directly accesses performance_data table. Use /api/scorecard/market/:marketId instead.');
+    console.error('🚫 POLICY VIOLATION: getMarketPerformanceData() called - this method is permanently disabled');
+    console.error('   Reason: Direct performance_data table access violates scorecard API policy');
+    console.error('   Required: Use /api/scorecard/market/:marketId endpoint only');
+    console.error(`   Parameters: marketId=${marketId}, month=${month}, year=${year}`);
+    throw error;
   }
 
   /**
@@ -1017,65 +845,16 @@ class AIDataService {
   }
 
   /**
-   * Get store history for a specific user and timeframe using performance data
+   * POLICY VIOLATION - PERMANENTLY DISABLED
+   * This method directly accessed performance_data table, violating scorecard API policy
    */
   async getUserStoreHistoryByTimeframe(userName, month, year) {
-    try {
-      // First find the user
-      const userResult = await this.pool.query(`
-        SELECT u.id, u.first_name, u.last_name, u.role
-        FROM users u
-        WHERE LOWER(u.first_name || ' ' || u.last_name) LIKE LOWER($1)
-          AND u.status = 'active'
-        LIMIT 1
-      `, [`%${userName}%`]);
-
-      if (userResult.rows.length === 0) {
-        return null;
-      }
-
-      const user = userResult.rows[0];
-
-      // Get stores worked at during the specific timeframe from performance_data
-      const result = await this.pool.query(`
-        SELECT DISTINCT
-          pd.store_id,
-          s.name as store_name,
-          s.city,
-          s.state,
-          m.name as market_name,
-          COUNT(pd.id) as record_count,
-          MIN(pd.upload_date) as first_date,
-          MAX(pd.upload_date) as last_date
-        FROM performance_data pd
-        LEFT JOIN stores s ON pd.store_id = s.id
-        LEFT JOIN markets m ON s.market_id = m.id
-        WHERE pd.advisor_user_id = $1
-          AND EXTRACT(YEAR FROM pd.upload_date) = $2
-          AND EXTRACT(MONTH FROM pd.upload_date) = $3
-        GROUP BY pd.store_id, s.name, s.city, s.state, m.name
-        ORDER BY record_count DESC, s.name
-      `, [user.id, year, month]);
-
-      // Format the results to include user info
-      return result.rows.map(row => ({
-        id: user.id,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        role: user.role,
-        store_name: row.store_name,
-        city: row.city,
-        state: row.state,
-        market_name: row.market_name,
-        performance_records: row.record_count,
-        first_record: row.first_date,
-        last_record: row.last_date,
-        timeframe: `${month}/${year}`
-      }));
-    } catch (error) {
-      console.error('❌ Error getting user store history by timeframe:', error);
-      throw error;
-    }
+    const error = new Error('POLICY VIOLATION: getUserStoreHistoryByTimeframe() directly accesses performance_data table. Use organizational lookup functions instead.');
+    console.error('🚫 POLICY VIOLATION: getUserStoreHistoryByTimeframe() called - this method is permanently disabled');
+    console.error('   Reason: Direct performance_data table access violates scorecard API policy');
+    console.error('   Required: Use getUserContext(), getStoreEmployees(), getOrganizationalStructure() for organizational data');
+    console.error(`   Parameters: userName=${userName}, month=${month}, year=${year}`);
+    throw error;
   }
 
   /**
@@ -1157,7 +936,10 @@ class AIDataService {
       
       if (targetMonth && targetYear) {
         console.log(`🔍 Detected store history query for: "${name}" during ${targetMonth}/${targetYear}`);
-        return await this.getUserStoreHistoryByTimeframe(name, targetMonth, targetYear);
+        console.log('🚫 POLICY ENFORCEMENT: getUserStoreHistoryByTimeframe() disabled - use organizational lookup functions instead');
+        console.log(`   Query requested: store history for "${name}" during ${targetMonth}/${targetYear}`);
+        console.log('   Required: Use getUserContext(), getStoreEmployees(), getOrganizationalStructure()');
+        return [];
       } else {
         console.log(`🔍 Detected store history query for: "${name}"`);
         return await this.getUserStoreHistory(name);
@@ -1256,101 +1038,29 @@ class AIDataService {
   }
 
   /**
-   * Get specific month/year performance data (for direct queries like "July sales")
+   * POLICY VIOLATION - PERMANENTLY DISABLED
+   * This method directly accessed performance_data table, violating scorecard API policy
    */
   async getMonthYearPerformance(marketName, month, year) {
-    try {
-      const result = await this.pool.query(`
-        WITH latest_upload AS (
-          SELECT MAX(upload_date) as latest_date
-          FROM performance_data pd
-          WHERE pd.data_type = 'services'
-            AND EXTRACT(MONTH FROM pd.upload_date) = $2
-            AND EXTRACT(YEAR FROM pd.upload_date) = $3
-            AND pd.data->>'market' = $1
-        )
-        SELECT 
-          pd.data->>'market' as market_name,
-          TO_CHAR(pd.upload_date, 'Month YYYY') as period,
-          pd.upload_date,
-          COUNT(DISTINCT pd.advisor_user_id) as advisor_count,
-          SUM((pd.data->>'sales')::int) as total_sales,
-          AVG((pd.data->>'gpPercent')::float) as avg_gp_percent,
-          SUM((pd.data->>'invoices')::int) as total_invoices,
-          'final_mtd' as data_source
-        FROM performance_data pd
-        JOIN latest_upload lu ON pd.upload_date = lu.latest_date
-        WHERE pd.data_type = 'services'
-          AND pd.data->>'market' = $1
-        GROUP BY pd.data->>'market', pd.upload_date
-      `, [marketName, month, year]);
-
-      return result.rows[0] || null;
-    } catch (error) {
-      console.error('❌ Error getting month/year performance:', error);
-      throw error;
-    }
+    const error = new Error('POLICY VIOLATION: getMonthYearPerformance() directly accesses performance_data table. Use /api/scorecard/market/:marketId instead.');
+    console.error('🚫 POLICY VIOLATION: getMonthYearPerformance() called - this method is permanently disabled');
+    console.error('   Reason: Direct performance_data table access violates scorecard API policy');
+    console.error('   Required: Use /api/scorecard/market/:marketId endpoint only');
+    console.error(`   Parameters: marketName=${marketName}, month=${month}, year=${year}`);
+    throw error;
   }
 
   /**
-   * Get top performers by specific metric for a given month
+   * POLICY VIOLATION - PERMANENTLY DISABLED
+   * This method directly accessed performance_data table, violating scorecard API policy
    */
   async getTopPerformers(metric, marketName, month, year, limit = 5) {
-    try {
-      // Map common metric names to JSON field names
-      const metricMap = {
-        'tire': 'retailTires',
-        'tires': 'retailTires',
-        'tire sales': 'retailTires',
-        'oil change': 'oilChange',
-        'oil changes': 'oilChange',
-        'sales': 'sales',
-        'revenue': 'sales',
-        'gp': 'gpPercent',
-        'gross profit': 'gpPercent',
-        'gpSales': 'gpSales',
-        'gp sales': 'gpSales',
-        'gross profit sales': 'gpSales',
-        'alignments': 'alignments',
-        'brake service': 'brakeService',
-        'brakes': 'brakeService'
-      };
-
-      const jsonField = metricMap[metric.toLowerCase()] || metric;
-      
-      const result = await this.pool.query(`
-        WITH latest_upload AS (
-          SELECT MAX(upload_date) as latest_date
-          FROM performance_data pd
-          WHERE pd.data_type = 'services'
-            AND EXTRACT(MONTH FROM pd.upload_date) = $2
-            AND EXTRACT(YEAR FROM pd.upload_date) = $3
-            AND pd.data->>'market' = $1
-        )
-        SELECT DISTINCT
-          pd.advisor_user_id,
-          u.first_name || ' ' || u.last_name as advisor_name,
-          pd.data->>'storeName' as store,
-          (pd.data->>$4)::float as metric_value,
-          (pd.data->>'sales')::int as total_sales,
-          (pd.data->>'gpPercent')::float as gp_percent,
-          pd.upload_date
-        FROM performance_data pd
-        JOIN users u ON pd.advisor_user_id = u.id
-        JOIN latest_upload lu ON pd.upload_date = lu.latest_date
-        WHERE pd.data_type = 'services'
-          AND pd.data->>'market' = $1
-          AND pd.data->>$4 IS NOT NULL
-          AND (pd.data->>$4)::float > 0
-        ORDER BY (pd.data->>$4)::float DESC
-        LIMIT $5
-      `, [marketName, month, year, jsonField, limit]);
-
-      return result.rows;
-    } catch (error) {
-      console.error('❌ Error getting top performers:', error);
-      throw error;
-    }
+    const error = new Error('POLICY VIOLATION: getTopPerformers() directly accesses performance_data table. Use scorecard API endpoints instead.');
+    console.error('🚫 POLICY VIOLATION: getTopPerformers() called - this method is permanently disabled');
+    console.error('   Reason: Direct performance_data table access violates scorecard API policy');
+    console.error('   Required: Use /api/scorecard/* endpoints for performance comparisons');
+    console.error(`   Parameters: metric=${metric}, marketName=${marketName}, month=${month}, year=${year}, limit=${limit}`);
+    throw error;
   }
 
   /**
@@ -1595,18 +1305,10 @@ class AIDataService {
           
           console.log(`🎯 Detected top performer query: top ${limit} ${metric} performers for ${targetMonth}/${targetYear}`);
           
-          try {
-            topPerformersData = await this.getTopPerformers(
-              metric, 
-              userData.market_name || 'Tire South - Tekmetric',
-              targetMonth,
-              targetYear,
-              limit
-            );
-            console.log(`🏆 Found ${topPerformersData.length} top performers for ${metric}`);
-          } catch (error) {
-            console.error('⚠️ Could not get top performers:', error.message);
-          }
+          console.log('🚫 POLICY ENFORCEMENT: getTopPerformers() disabled - use scorecard API endpoints instead');
+          console.log(`   Query requested: top ${limit} ${metric} performers for ${targetMonth}/${targetYear}`);
+          console.log('   Required: Use /api/scorecard/* endpoints for performance comparisons');
+          topPerformersData = [];
         }
       }
       
@@ -1626,9 +1328,9 @@ class AIDataService {
       // Get goals
       const goalsData = await this.getGoalsData(userId);
       
-      // Get market performance aggregations (focus on MTD data)
-      const marketPerformanceData = userData.market_id ? 
-        await this.getMarketPerformanceData(userData.market_id) : [];
+      // POLICY ENFORCEMENT: No market performance aggregations from raw data
+      console.log('🚫 Skipping market performance data - use /api/scorecard/market/:marketId instead');
+      const marketPerformanceData = [];
       
       // Get full market and store data with error handling
       let marketData = [];
@@ -1684,13 +1386,9 @@ class AIDataService {
         return [];
       });
       
-      // Get peer comparison data (safely)
+      // POLICY ENFORCEMENT: No peer comparison data from raw performance_data
+      console.log('🚫 Skipping peer comparison data - use scorecard API endpoints instead');
       let peerData = [];
-      try {
-        peerData = await this.getPeerComparison(userId, userData.market_id, userData.store_id, 5);
-      } catch (error) {
-        console.warn('⚠️ Could not get peer data:', error.message);
-      }
 
 
       const context = {

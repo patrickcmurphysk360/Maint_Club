@@ -98,15 +98,27 @@ router.post('/chat', async (req, res) => {
     // Build user display name
     userData.name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User';
 
-    // Get recent performance data
-    const performanceResult = await pool.query(`
-      SELECT upload_date, data, store_id
-      FROM performance_data
-      WHERE advisor_user_id = $1
-        AND data_type = 'services'
-      ORDER BY upload_date DESC
-      LIMIT 3
-    `, [targetUserId]);
+    // POLICY ENFORCEMENT: Use validated scorecard data instead of raw performance_data
+    console.log('🛡️ POLICY COMPLIANCE: Using validated scorecard utility for performance data');
+    const { getValidatedScorecardData } = require('../utils/scorecardDataAccess');
+    
+    let performanceResult = { rows: [] };
+    try {
+      const scorecardResult = await getValidatedScorecardData({ level: 'advisor', id: targetUserId });
+      
+      // Convert to legacy format for backward compatibility
+      if (scorecardResult.success) {
+        performanceResult.rows = [{
+          upload_date: scorecardResult.metadata.retrievedAt,
+          data: scorecardResult.data,
+          store_id: null // Not available in validated scorecard format
+        }];
+        console.log('✅ Using validated scorecard data for AI insights');
+      }
+    } catch (error) {
+      console.error('⚠️ POLICY ENFORCEMENT: Could not get scorecard data:', error.message);
+      // Leave performanceResult empty - do not fall back to raw data
+    }
 
     // Get goals if available
     console.log('🎯 Querying goals for user:', targetUserId);
@@ -239,15 +251,26 @@ router.get('/insights/advisor/:userId', async (req, res) => {
     // Build user display name
     userData.name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User';
 
-    // Get recent performance data
-    const performanceResult = await pool.query(`
-      SELECT upload_date, data
-      FROM performance_data
-      WHERE advisor_user_id = $1
-        AND data_type = 'services'
-      ORDER BY upload_date DESC
-      LIMIT 3
-    `, [userIdNum]);
+    // POLICY ENFORCEMENT: Use validated scorecard data instead of raw performance_data
+    console.log('🛡️ POLICY COMPLIANCE: Using validated scorecard utility for insights');
+    const { getValidatedScorecardData } = require('../utils/scorecardDataAccess');
+    
+    let performanceResult = { rows: [] };
+    try {
+      const scorecardResult = await getValidatedScorecardData({ level: 'advisor', id: userIdNum });
+      
+      // Convert to legacy format for backward compatibility
+      if (scorecardResult.success) {
+        performanceResult.rows = [{
+          upload_date: scorecardResult.metadata.retrievedAt,
+          data: scorecardResult.data
+        }];
+        console.log('✅ Using validated scorecard data for insights');
+      }
+    } catch (error) {
+      console.error('⚠️ POLICY ENFORCEMENT: Could not get scorecard data:', error.message);
+      // Leave performanceResult empty - do not fall back to raw data
+    }
 
     if (performanceResult.rows.length === 0) {
       return res.json({
