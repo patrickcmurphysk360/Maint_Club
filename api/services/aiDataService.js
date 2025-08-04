@@ -1044,7 +1044,16 @@ class AIDataService {
       }
     }
     
-    // Detect role-based queries
+    // Detect role + location queries BEFORE general role queries
+    const roleLocationMatch = lowerQuery.match(/(?:what|which)\s+(managers?|advisors?|employees?)\s+(?:work|are)\s+(?:in|at)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i);
+    if (roleLocationMatch) {
+      const role = roleLocationMatch[1];
+      const storeName = roleLocationMatch[2].trim();
+      console.log(`🔍 Detected role+location query: ${role} at "${storeName}"`);
+      return await this.getStoreEmployeesByRole(storeName, role);
+    }
+    
+    // Detect role-based queries (only if not a location-specific query)
     if (lowerQuery.includes('managers') || lowerQuery.includes('advisors') || 
         lowerQuery.includes('admin')) {
       const roleMatch = lowerQuery.match(/(managers?|advisors?|admins?|administrators?)/);
@@ -1149,6 +1158,44 @@ class AIDataService {
       return result.rows;
     } catch (error) {
       console.error('❌ Error getting store manager:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get employees by role at a specific store
+   */
+  async getStoreEmployeesByRole(storeName, role) {
+    try {
+      // Normalize role names
+      let roleFilter = role.toLowerCase();
+      if (roleFilter === 'advisors') roleFilter = 'advisor';
+      else if (roleFilter === 'managers') roleFilter = '%manager%';
+      else if (roleFilter === 'employees') roleFilter = '%'; // All roles
+      
+      const result = await this.pool.query(`
+        SELECT DISTINCT
+          u.id,
+          u.first_name,
+          u.last_name,
+          u.role,
+          s.name as store_name,
+          s.city,
+          s.state,
+          m.name as market_name
+        FROM users u
+        JOIN user_store_assignments usa ON u.id::text = usa.user_id
+        JOIN stores s ON usa.store_id::integer = s.id
+        LEFT JOIN markets m ON s.market_id = m.id
+        WHERE LOWER(s.name) LIKE LOWER($1)
+          AND LOWER(u.role) LIKE LOWER($2)
+          AND u.status = 'active'
+        ORDER BY u.role, u.last_name, u.first_name
+      `, [`%${storeName}%`, roleFilter]);
+
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error getting store employees by role:', error);
       throw error;
     }
   }
