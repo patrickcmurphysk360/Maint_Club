@@ -2,6 +2,7 @@ const axios = require('axios');
 const { AI_AGENT_CONFIG, PROMPT_TEMPLATES, DATA_FORMATTERS } = require('../config/aiPrompts');
 const AIDataService = require('./aiDataService');
 const ScorecardFieldValidator = require('./scorecardFieldValidator');
+const AIValidationMiddleware = require('../middleware/aiValidationMiddleware');
 
 class OllamaService {
   constructor(pool = null) {
@@ -10,6 +11,7 @@ class OllamaService {
     this.pool = pool;
     this.aiDataService = pool ? new AIDataService(pool) : null;
     this.scorecardValidator = new ScorecardFieldValidator(pool);
+    this.validationMiddleware = pool ? new AIValidationMiddleware(pool) : null;
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 120000, // 2 minute timeout for AI responses
@@ -133,33 +135,75 @@ class OllamaService {
           done: response.data.done
         };
 
-        // SCORECARD VALIDATION: Validate response if needed
+        // ENHANCED SCORECARD VALIDATION: Multiple validation layers
         if (userId && query && this.scorecardValidator.shouldValidate(query, contextData)) {
-          console.log('🛡️ Validating AI response against scorecard field whitelist...');
+          console.log('🛡️ Running comprehensive AI response validation...');
           
-          const validation = await this.scorecardValidator.validateResponse(
+          // Layer 1: Original field whitelist validation
+          const fieldValidation = await this.scorecardValidator.validateResponse(
             response.data.response,
             userId,
             query,
             contextData
           );
 
-          // Add validation metadata to response
-          finalResponse.validation = {
-            isValid: validation.isValid,
-            violationCount: validation.violations.length,
-            approvedFieldCount: validation.approvedFields.length
+          // Layer 2: New performance metrics validation middleware
+          let metricValidation = null;
+          if (this.validationMiddleware) {
+            console.log('🎯 Running performance metrics validation against scorecard API...');
+            metricValidation = await this.validationMiddleware.validateAIResponse(
+              query,
+              response.data.response,
+              userId,
+              contextData
+            );
+          }
+
+          // Combine validation results
+          const combinedValidation = {
+            fieldValidation: {
+              isValid: fieldValidation.isValid,
+              violationCount: fieldValidation.violations.length,
+              approvedFieldCount: fieldValidation.approvedFields.length
+            },
+            metricValidation: metricValidation ? {
+              isValid: metricValidation.isValid,
+              mismatchCount: metricValidation.mismatches.length,
+              confidenceScore: metricValidation.confidenceScore,
+              hasDisclaimer: !!metricValidation.disclaimer
+            } : null,
+            overallValid: fieldValidation.isValid && (!metricValidation || metricValidation.isValid)
           };
 
-          // Sanitize response if needed
-          if (!validation.isValid) {
-            console.warn(`⚠️ Response validation failed with ${validation.violations.length} violations`);
-            finalResponse.response = this.scorecardValidator.sanitizeResponse(
-              response.data.response,
-              validation
+          finalResponse.validation = combinedValidation;
+
+          // Apply corrections and disclaimers if needed
+          let correctedResponse = response.data.response;
+
+          // Apply field validation corrections first
+          if (!fieldValidation.isValid) {
+            console.warn(`⚠️ Field validation failed with ${fieldValidation.violations.length} violations`);
+            correctedResponse = this.scorecardValidator.sanitizeResponse(
+              correctedResponse,
+              fieldValidation
             );
+          }
+
+          // Apply metric validation corrections and disclaimers
+          if (metricValidation && !metricValidation.isValid) {
+            console.warn(`⚠️ Metric validation failed with ${metricValidation.mismatches.length} mismatches (confidence: ${metricValidation.confidenceScore})`);
+            correctedResponse = await this.validationMiddleware.rephraseResponse(
+              correctedResponse,
+              metricValidation
+            );
+          }
+
+          finalResponse.response = correctedResponse;
+
+          if (combinedValidation.overallValid) {
+            console.log('✅ All validation layers passed successfully');
           } else {
-            console.log(`✅ Response validation passed with ${validation.approvedFields.length} approved fields`);
+            console.warn('⚠️ One or more validation layers failed - response has been corrected');
           }
         }
 
@@ -208,33 +252,75 @@ class OllamaService {
           done: response.data.done
         };
 
-        // SCORECARD VALIDATION: Validate response if needed
+        // ENHANCED SCORECARD VALIDATION: Multiple validation layers (Chat)
         if (userId && query && this.scorecardValidator.shouldValidate(query, contextData)) {
-          console.log('🛡️ Validating AI response against scorecard field whitelist...');
+          console.log('🛡️ Running comprehensive AI chat response validation...');
           
-          const validation = await this.scorecardValidator.validateResponse(
+          // Layer 1: Original field whitelist validation
+          const fieldValidation = await this.scorecardValidator.validateResponse(
             response.data.message.content,
             userId,
             query,
             contextData
           );
 
-          // Add validation metadata to response
-          finalResponse.validation = {
-            isValid: validation.isValid,
-            violationCount: validation.violations.length,
-            approvedFieldCount: validation.approvedFields.length
+          // Layer 2: New performance metrics validation middleware
+          let metricValidation = null;
+          if (this.validationMiddleware) {
+            console.log('🎯 Running chat performance metrics validation against scorecard API...');
+            metricValidation = await this.validationMiddleware.validateAIResponse(
+              query,
+              response.data.message.content,
+              userId,
+              contextData
+            );
+          }
+
+          // Combine validation results
+          const combinedValidation = {
+            fieldValidation: {
+              isValid: fieldValidation.isValid,
+              violationCount: fieldValidation.violations.length,
+              approvedFieldCount: fieldValidation.approvedFields.length
+            },
+            metricValidation: metricValidation ? {
+              isValid: metricValidation.isValid,
+              mismatchCount: metricValidation.mismatches.length,
+              confidenceScore: metricValidation.confidenceScore,
+              hasDisclaimer: !!metricValidation.disclaimer
+            } : null,
+            overallValid: fieldValidation.isValid && (!metricValidation || metricValidation.isValid)
           };
 
-          // Sanitize response if needed
-          if (!validation.isValid) {
-            console.warn(`⚠️ Response validation failed with ${validation.violations.length} violations`);
-            finalResponse.message.content = this.scorecardValidator.sanitizeResponse(
-              response.data.message.content,
-              validation
+          finalResponse.validation = combinedValidation;
+
+          // Apply corrections and disclaimers if needed
+          let correctedResponse = response.data.message.content;
+
+          // Apply field validation corrections first
+          if (!fieldValidation.isValid) {
+            console.warn(`⚠️ Chat field validation failed with ${fieldValidation.violations.length} violations`);
+            correctedResponse = this.scorecardValidator.sanitizeResponse(
+              correctedResponse,
+              fieldValidation
             );
+          }
+
+          // Apply metric validation corrections and disclaimers
+          if (metricValidation && !metricValidation.isValid) {
+            console.warn(`⚠️ Chat metric validation failed with ${metricValidation.mismatches.length} mismatches (confidence: ${metricValidation.confidenceScore})`);
+            correctedResponse = await this.validationMiddleware.rephraseResponse(
+              correctedResponse,
+              metricValidation
+            );
+          }
+
+          finalResponse.message.content = correctedResponse;
+
+          if (combinedValidation.overallValid) {
+            console.log('✅ All chat validation layers passed successfully');
           } else {
-            console.log(`✅ Response validation passed with ${validation.approvedFields.length} approved fields`);
+            console.warn('⚠️ One or more chat validation layers failed - response has been corrected');
           }
         }
 
