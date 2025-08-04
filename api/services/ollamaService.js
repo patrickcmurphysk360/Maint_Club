@@ -299,32 +299,28 @@ class OllamaService {
       const userData = userResult.rows[0] || {};
       userData.name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown User';
 
-      // Get latest MTD data per month
-      const performanceResult = await this.pool.query(`
-        WITH latest_per_month AS (
-          SELECT 
-            EXTRACT(YEAR FROM upload_date) as year,
-            EXTRACT(MONTH FROM upload_date) as month,
-            MAX(upload_date) as latest_date
-          FROM performance_data
-          WHERE advisor_user_id = $1 AND data_type = 'services'
-          GROUP BY EXTRACT(YEAR FROM upload_date), EXTRACT(MONTH FROM upload_date)
-          ORDER BY year DESC, month DESC
-          LIMIT 3
-        )
-        SELECT 
-          pd.upload_date, 
-          pd.data, 
-          pd.store_id,
-          s.name as store_name,
-          m.name as market_name
-        FROM performance_data pd
-        LEFT JOIN stores s ON pd.store_id = s.id
-        LEFT JOIN markets m ON s.market_id = m.id
-        JOIN latest_per_month lpm ON pd.upload_date = lpm.latest_date
-        WHERE pd.advisor_user_id = $1 AND pd.data_type = 'services'
-        ORDER BY pd.upload_date DESC
-      `, [userId]);
+      // POLICY ENFORCEMENT: Use validated scorecard utility instead of raw data
+      console.log('🎯 Basic context builder enforcing scorecard API policy');
+      const { getValidatedScorecardData } = require('../utils/scorecardDataAccess');
+      
+      let performanceResult = { rows: [] };
+      try {
+        const scorecardResult = await getValidatedScorecardData({ level: 'advisor', id: userId });
+        
+        // Convert to legacy format for backward compatibility
+        performanceResult.rows = [{
+          upload_date: scorecardResult.metadata.retrievedAt,
+          data: scorecardResult.data,
+          store_id: null, // Not available in scorecard format
+          store_name: userData.store_name,
+          market_name: userData.market_name
+        }];
+        
+        console.log('✅ Basic context using validated scorecard data');
+      } catch (error) {
+        console.error('⚠️ POLICY ENFORCEMENT: Could not get scorecard data for basic context:', error.message);
+        // Leave performanceResult empty - do not fall back to raw data
+      }
 
       const goalsResult = await this.pool.query(`
         SELECT metric_name, target_value, period_type, goal_type
@@ -401,57 +397,80 @@ class OllamaService {
 
 **PERFORMANCE DATA:**`;
 
-      // PERFORMANCE DATA: Use ONLY validated scorecard data
-      if (context.performance?.is_performance_query && context.performance?.validated_data) {
+      // POLICY ENFORCEMENT: Use ONLY validated scorecard data from authorized endpoints
+      if (context.performance?.is_performance_query && context.performance?.policy_compliant) {
         const validatedData = context.performance.validated_data;
         
-        if (validatedData.success && validatedData.data) {
+        if (validatedData && validatedData.success && validatedData.data) {
+          contextInfo += `
+**🔒 POLICY-COMPLIANT SCORECARD DATA**`;
+          
           if (context.performance.is_specific_person_query) {
             contextInfo += `
-**VALIDATED SCORECARD DATA: ${context.performance.specific_person_name?.toUpperCase() || 'UNKNOWN'}**
-Source: ${validatedData.source} (${validatedData.endpoint})
-Retrieved: ${new Date(validatedData.retrieved_at).toLocaleDateString()}`;
-            
-            const scorecardData = validatedData.data;
+Target: ${context.performance.specific_person_name?.toUpperCase() || 'UNKNOWN'}
+Source: ${validatedData.metadata.source} 
+Endpoint: ${validatedData.metadata.endpoint}
+Retrieved: ${new Date(validatedData.metadata.retrievedAt).toLocaleDateString()}
+Data Integrity: ${validatedData.metadata.dataIntegrity}`;
+          } else {
             contextInfo += `
+Source: ${validatedData.metadata.source}
+Endpoint: ${validatedData.metadata.endpoint}  
+Retrieved: ${new Date(validatedData.metadata.retrievedAt).toLocaleDateString()}
+Data Integrity: ${validatedData.metadata.dataIntegrity}`;
+          }
+            
+          const scorecardData = validatedData.data;
+          contextInfo += `
+
+**AUTHORIZED PERFORMANCE METRICS:**
 - Sales: $${scorecardData.sales?.toLocaleString() || 'N/A'}
 - GP Sales: $${scorecardData.gpSales?.toLocaleString() || 'N/A'} (${scorecardData.gpPercent || 'N/A'}%)
 - Invoices: ${scorecardData.invoices || 'N/A'}
 - Alignments: ${scorecardData.alignments || 'N/A'}
 - Oil Changes: ${scorecardData.oilChange || 'N/A'}
-- Retail Tires: ${scorecardData.retailTires || 'N/A'}
-- TPP: ${scorecardData.tpp || 'N/A'}
-- PAT: ${scorecardData.pat || 'N/A'}`;
-            
-            if (scorecardData.fluid_attach_rates) {
-              contextInfo += `
-- Fluid Attach Rates: ${JSON.stringify(scorecardData.fluid_attach_rates)}`;
-            }
-          } else {
+- Retail Tires: ${scorecardData.retailTires || 'N/A'}`;
+
+          // Show advanced calculated metrics if available
+          if (scorecardData.tpp) {
             contextInfo += `
-**VALIDATED SCORECARD DATA:**
-Source: ${validatedData.source} (${validatedData.endpoint})
-Retrieved: ${new Date(validatedData.retrieved_at).toLocaleDateString()}`;
-            
-            const scorecardData = validatedData.data;
-            contextInfo += `
-- Sales: $${scorecardData.sales?.toLocaleString() || 'N/A'}
-- GP Sales: $${scorecardData.gpSales?.toLocaleString() || 'N/A'} (${scorecardData.gpPercent || 'N/A'}%)
-- Invoices: ${scorecardData.invoices || 'N/A'}
-- TPP: ${scorecardData.tpp || 'N/A'}
-- PAT: ${scorecardData.pat || 'N/A'}`;
+- TPP (Tickets Per Pit): ${scorecardData.tpp} [CALCULATED BY SCORECARD SYSTEM]`;
           }
+          
+          if (scorecardData.pat) {
+            contextInfo += `
+- PAT (Parts Attach Rate): ${scorecardData.pat} [CALCULATED BY SCORECARD SYSTEM]`;
+          }
+          
+          if (scorecardData.fluid_attach_rates || scorecardData.fluidAttachRates) {
+            const fluidRates = scorecardData.fluid_attach_rates || scorecardData.fluidAttachRates;
+            contextInfo += `
+- Fluid Attach Rates: ${JSON.stringify(fluidRates)} [CALCULATED BY SCORECARD SYSTEM]`;
+          }
+          
+          if (scorecardData.vendorMapping) {
+            contextInfo += `
+- Vendor Mappings: Available [FROM SCORECARD SYSTEM]`;
+          }
+          
+        } else if (validatedData && !validatedData.success) {
+          contextInfo += `
+**🚫 SCORECARD API ERROR:** ${validatedData.error}
+Source: ${validatedData.metadata?.source || 'validated_scorecard_api'}
+Policy Status: Data access attempted but failed`;
         } else {
           contextInfo += `
-**PERFORMANCE DATA ERROR:** ${validatedData.error}
-Source: ${validatedData.source}`;
+**🚫 SCORECARD DATA UNAVAILABLE:** No validated data retrieved
+Policy Status: Performance query detected but no authorized data available`;
         }
       } else if (context.performance?.is_performance_query) {
         contextInfo += `
-**PERFORMANCE DATA:** Query detected but no validated scorecard data available`;
+**🚫 POLICY VIOLATION:** Performance query detected but no policy-compliant data
+Enforcement Level: ${context.performance?.enforcement_level || 'unknown'}
+Raw Spreadsheet Access: ${context.performance?.raw_spreadsheet_access ? 'ENABLED (VIOLATION)' : 'DISABLED (COMPLIANT)'}`;
       } else {
         contextInfo += `
-**PERFORMANCE DATA:** Not a performance-related query - no scorecard data requested`;
+**PERFORMANCE DATA:** Not a performance-related query - no scorecard access required`;
       }
 
       // Add goals information

@@ -349,105 +349,44 @@ class AIDataService {
   }
 
   /**
-   * DEPRECATED: Use getValidatedScorecardResponse() instead
-   * Get performance data from latest MTD spreadsheets
+   * FORBIDDEN: Direct access to raw performance data
+   * This method is permanently disabled to enforce scorecard API policy
    */
   async getPerformanceData(userId, limit = 3) {
-    console.warn('⚠️ DEPRECATED: getPerformanceData() called. Use getValidatedScorecardResponse() instead.');
-    try {
-      // Get latest upload per month for this advisor (since spreadsheets are MTD)
-      const result = await this.pool.query(`
-        WITH latest_per_month AS (
-          SELECT 
-            EXTRACT(YEAR FROM upload_date) as year,
-            EXTRACT(MONTH FROM upload_date) as month,
-            MAX(upload_date) as latest_date
-          FROM performance_data
-          WHERE advisor_user_id = $1 AND data_type = 'services'
-          GROUP BY EXTRACT(YEAR FROM upload_date), EXTRACT(MONTH FROM upload_date)
-          ORDER BY year DESC, month DESC
-          LIMIT $2
-        )
-        SELECT 
-          pd.upload_date, 
-          pd.data, 
-          pd.store_id,
-          pd.data_type,
-          s.name as store_name,
-          m.name as market_name,
-          'latest_mtd' as data_source
-        FROM performance_data pd
-        LEFT JOIN stores s ON pd.store_id = s.id
-        LEFT JOIN markets m ON s.market_id = m.id
-        JOIN latest_per_month lpm ON pd.upload_date = lpm.latest_date
-        WHERE pd.advisor_user_id = $1 AND pd.data_type = 'services'
-        ORDER BY pd.upload_date DESC
-      `, [userId, limit]);
-
-      return result.rows;
-    } catch (error) {
-      console.error('❌ Error getting performance data:', error);
-      throw error;
-    }
+    const error = new Error('POLICY VIOLATION: Direct access to raw performance data is forbidden. Use getValidatedScorecardData() utility from /utils/scorecardDataAccess.js instead.');
+    console.error('🚫 POLICY VIOLATION: getPerformanceData() called - this method is permanently disabled');
+    console.error('   Reason: Raw spreadsheet access is forbidden');
+    console.error('   Required: Use getValidatedScorecardData() from /utils/scorecardDataAccess.js');
+    console.error(`   User ID: ${userId}, Limit: ${limit}`);
+    throw error;
   }
 
   /**
-   * Get validated scorecard data using the single source of truth API endpoints
-   * This is the ONLY method that should be used for performance-related queries
+   * REPLACED: Use getValidatedScorecardData utility instead
+   * This method is deprecated in favor of the centralized utility
    */
   async getValidatedScorecardResponse(targetType, targetId, contextUserId = null) {
+    console.warn('⚠️ DEPRECATED: getValidatedScorecardResponse() is deprecated. Use getValidatedScorecardData() utility instead.');
+    
+    const { getValidatedScorecardData } = require('../utils/scorecardDataAccess');
+    
     try {
-      console.log(`📊 Getting validated scorecard data: ${targetType}/${targetId}`);
+      // Map old parameter names to new utility
+      const level = targetType === 'user' ? 'advisor' : targetType;
+      const result = await getValidatedScorecardData({ level, id: targetId });
       
-      const axios = require('axios');
-      const baseURL = process.env.API_BASE_URL || 'http://localhost:5000';
-      
-      let endpoint;
-      let endpointDescription;
-      
-      switch (targetType.toLowerCase()) {
-        case 'advisor':
-        case 'user':
-          endpoint = `${baseURL}/api/scorecard/advisor/${targetId}`;
-          endpointDescription = `advisor scorecard for user ID ${targetId}`;
-          break;
-        case 'store':
-          endpoint = `${baseURL}/api/scorecard/store/${targetId}`;
-          endpointDescription = `store scorecard for store ID ${targetId}`;
-          break;
-        case 'market':
-          endpoint = `${baseURL}/api/scorecard/market/${targetId}`;
-          endpointDescription = `market scorecard for market ID ${targetId}`;
-          break;
-        default:
-          throw new Error(`Invalid scorecard target type: ${targetType}. Use 'advisor', 'store', or 'market'.`);
-      }
-
-      console.log(`🔗 Fetching ${endpointDescription} from: ${endpoint}`);
-      
-      const response = await axios.get(endpoint, {
-        timeout: 10000,
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.data && response.data.success) {
-        console.log(`✅ Successfully retrieved validated ${endpointDescription}`);
-        return {
-          success: true,
-          data: response.data.data,
-          source: 'validated_scorecard_api',
-          endpoint: endpoint,
-          target_type: targetType,
-          target_id: targetId,
-          retrieved_at: new Date().toISOString()
-        };
-      } else {
-        throw new Error(`Invalid response from scorecard API: ${response.data?.message || 'Unknown error'}`);
-      }
+      // Return in old format for backward compatibility
+      return {
+        success: result.success,
+        data: result.data,
+        source: result.metadata.source,
+        endpoint: result.metadata.endpoint,
+        target_type: targetType,
+        target_id: targetId,
+        retrieved_at: result.metadata.retrievedAt
+      };
     } catch (error) {
-      console.error(`❌ Error getting validated scorecard response for ${targetType}/${targetId}:`, error.message);
+      console.error(`❌ Error in deprecated getValidatedScorecardResponse: ${error.message}`);
       return {
         success: false,
         error: error.message,
@@ -1524,9 +1463,11 @@ class AIDataService {
       let specificPersonQuery = null;
       let specificPersonPerformanceData = null;
       
-      // PERFORMANCE DATA: Use ONLY validated scorecard endpoints
+      // PERFORMANCE DATA: Use ONLY validated scorecard endpoints via utility
       if (isPerformanceQuery) {
-        console.log('🎯 Performance query detected - using validated scorecard endpoints only');
+        console.log('🎯 Performance query detected - enforcing scorecard API policy');
+        
+        const { getValidatedScorecardData } = require('../utils/scorecardDataAccess');
         
         // Check if asking about specific person's performance
         if (query) {
@@ -1563,22 +1504,55 @@ class AIDataService {
               const personResults = await this.searchUsers(personName, 'name');
               if (personResults.length > 0) {
                 const personId = personResults[0].id;
-                console.log(`📊 Getting VALIDATED scorecard data for ${personResults[0].first_name} ${personResults[0].last_name} (ID: ${personId})`);
+                console.log(`📊 POLICY ENFORCEMENT: Getting advisor scorecard for ${personResults[0].first_name} ${personResults[0].last_name} (ID: ${personId})`);
                 
                 specificPersonQuery = personName;
-                // Use VALIDATED scorecard endpoint instead of raw performance data
-                specificPersonPerformanceData = await this.getValidatedScorecardResponse('advisor', personId, userId);
+                // Use VALIDATED scorecard utility - THE ONLY AUTHORIZED METHOD
+                const scorecardResult = await getValidatedScorecardData({ 
+                  level: 'advisor', 
+                  id: personId 
+                });
+                
+                specificPersonPerformanceData = {
+                  success: scorecardResult.success,
+                  data: scorecardResult.data,
+                  metadata: scorecardResult.metadata
+                };
               }
             } catch (error) {
-              console.warn('⚠️ Could not get specific person scorecard:', error.message);
+              console.error('⚠️ POLICY ENFORCEMENT FAILED: Could not get specific person scorecard:', error.message);
+              specificPersonPerformanceData = {
+                success: false,
+                error: error.message,
+                metadata: { source: 'validated_scorecard_api', dataIntegrity: 'failed' }
+              };
             }
           }
         }
         
-        // Get performance data for the requesting user using VALIDATED scorecard endpoint
+        // Get performance data for the requesting user using VALIDATED scorecard utility
         if (!specificPersonPerformanceData) {
-          console.log(`📊 Getting VALIDATED scorecard data for requesting user (ID: ${userId})`);
-          performanceData = await this.getValidatedScorecardResponse('advisor', userId, userId);
+          console.log(`📊 POLICY ENFORCEMENT: Getting advisor scorecard for requesting user (ID: ${userId})`);
+          
+          try {
+            const scorecardResult = await getValidatedScorecardData({ 
+              level: 'advisor', 
+              id: userId 
+            });
+            
+            performanceData = {
+              success: scorecardResult.success,
+              data: scorecardResult.data,
+              metadata: scorecardResult.metadata
+            };
+          } catch (error) {
+            console.error('⚠️ POLICY ENFORCEMENT FAILED: Could not get user scorecard:', error.message);
+            performanceData = {
+              success: false,
+              error: error.message,
+              metadata: { source: 'validated_scorecard_api', dataIntegrity: 'failed' }
+            };
+          }
         }
       }
 
@@ -1726,17 +1700,25 @@ class AIDataService {
           store: userData.store_name || userData.store
         },
         performance: {
-          // Use validated scorecard data when available
+          // POLICY ENFORCEMENT: Only validated scorecard data
           validated_data: specificPersonPerformanceData || performanceData,
           is_performance_query: isPerformanceQuery,
           is_specific_person_query: !!specificPersonQuery,
           specific_person_name: specificPersonQuery,
-          data_source: 'validated_scorecard_api',
-          // Legacy fields for backward compatibility (but marked as deprecated)
-          recent_data: [], // DEPRECATED: Use validated_data instead
-          latest: {}, // DEPRECATED: Use validated_data instead
-          timeframe: null, // DEPRECATED: Use validated_data.retrieved_at instead
-          store_name: null // DEPRECATED: Use user context instead
+          data_source: 'validated_scorecard_api_enforced',
+          policy_compliant: true,
+          
+          // FORBIDDEN: Legacy fields permanently disabled to prevent raw data access
+          recent_data: null, // PERMANENTLY DISABLED - use validated_data only
+          latest: null, // PERMANENTLY DISABLED - use validated_data only  
+          timeframe: null, // PERMANENTLY DISABLED - use validated_data.metadata.retrievedAt
+          store_name: null, // PERMANENTLY DISABLED - use user context instead
+          
+          // Policy enforcement metadata
+          enforcement_level: 'strict',
+          authorized_endpoints_only: true,
+          raw_spreadsheet_access: false,
+          manual_data_injection: false
         },
         goals: goalsData,
         organizational: {
