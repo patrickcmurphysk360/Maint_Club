@@ -879,23 +879,63 @@ class AIDataService {
     }
     
     // Detect role + location queries BEFORE general role queries
-    // Handle patterns like: "what advisors are working at McDonough", "which managers work in Atlanta store"
+    // Enhanced patterns for admin organizational queries with direct responses
     const roleLocationPatterns = [
-      // Pattern 1: "what/which [role] are working at [location]"
+      // Pattern 1: "what/which/who are the [role] at [location]"
+      /(?:what|which|who)\s+(?:are\s+(?:the\s+)?)?(?:advisors?|managers?|employees?)\s+(?:are\s+)?(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i,
+      // Pattern 2: "what/which [role] are working at [location]"
       /(?:what|which)\s+(managers?|advisors?|employees?)\s+are\s+working\s+(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i,
-      // Pattern 2: "what/which [role] work at [location]" 
+      // Pattern 3: "what/which [role] work at [location]" 
       /(?:what|which)\s+(managers?|advisors?|employees?)\s+work\s+(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i,
-      // Pattern 3: "what/which [role] are at [location]"
-      /(?:what|which)\s+(managers?|advisors?|employees?)\s+are\s+(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i
+      // Pattern 4: "list [role] at/for [location]"
+      /(?:list|show)\s+(?:me\s+)?(?:the\s+)?(managers?|advisors?|employees?)\s+(?:at|for|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i,
+      // Pattern 5: "who are the advisors at [location]" (direct match)
+      /who\s+are\s+(?:the\s+)?(managers?|advisors?|employees?)\s+(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i
     ];
     
     for (const pattern of roleLocationPatterns) {
       const roleLocationMatch = lowerQuery.match(pattern);
       if (roleLocationMatch) {
-        const role = roleLocationMatch[1];
-        const storeName = roleLocationMatch[2].trim();
+        // Extract role and store name from different capture groups depending on pattern
+        let role, storeName;
+        
+        // Determine if first capture group contains a role or store name
+        const possibleRole = roleLocationMatch[1]?.toLowerCase();
+        const isRoleInFirstGroup = possibleRole && ['advisor', 'advisors', 'manager', 'managers', 'employee', 'employees'].some(r => possibleRole.includes(r));
+        
+        if (isRoleInFirstGroup) {
+          // Standard pattern: role in first capture, store in second
+          role = roleLocationMatch[1];
+          storeName = roleLocationMatch[2]?.trim();
+        } else {
+          // Pattern 1 case: store name is in first capture group, detect role from query
+          storeName = roleLocationMatch[1]?.trim();
+          if (query.toLowerCase().includes('advisor')) role = 'advisors';
+          else if (query.toLowerCase().includes('manager')) role = 'managers';
+          else role = 'employees';
+        }
+        
+        // Ensure both role and storeName are defined
+        if (!role || !storeName) {
+          console.log(`⚠️ Could not extract role (${role}) or store name (${storeName}) from pattern match`);
+          continue;
+        }
+        
         console.log(`🔍 Detected role+location query: ${role} at "${storeName}"`);
-        return await this.getStoreEmployeesByRole(storeName, role);
+        
+        // Use optimized function for advisor queries
+        if (role.toLowerCase().includes('advisor')) {
+          console.log(`🎯 Using optimized getAdvisorsByStoreName for advisor query`);
+          const result = await this.getAdvisorsByStoreName(storeName);
+          if (result.success) {
+            return result.advisors;
+          } else {
+            // Return empty array with error info that AI can use
+            return [];
+          }
+        } else {
+          return await this.getStoreEmployeesByRole(storeName, role);
+        }
       }
     }
     
@@ -977,6 +1017,63 @@ class AIDataService {
     }
     
     return null; // No organizational query detected
+  }
+
+  /**
+   * Get advisors specifically by store name - optimized for common organizational queries
+   */
+  async getAdvisorsByStoreName(storeName) {
+    try {
+      console.log(`🔍 Searching for advisors at store: "${storeName}"`);
+      
+      // First check if the store exists
+      const storeCheck = await this.pool.query(`
+        SELECT id, name, city, state 
+        FROM stores 
+        WHERE name ILIKE $1
+        LIMIT 1
+      `, [`%${storeName}%`]);
+      
+      if (storeCheck.rows.length === 0) {
+        console.log(`❌ No store found matching: "${storeName}"`);
+        return {
+          success: false,
+          error: `No store found with the name '${storeName}'. Please double-check the spelling.`,
+          advisors: []
+        };
+      }
+      
+      const store = storeCheck.rows[0];
+      console.log(`✅ Found store: ${store.name} (ID: ${store.id})`);
+      
+      // Get advisors for the store
+      const result = await this.pool.query(`
+        SELECT DISTINCT
+          u.id, u.first_name, u.last_name, u.email, u.role,
+          s.name as store_name, s.city, s.state
+        FROM users u
+        JOIN user_store_assignments usa ON u.id::text = usa.user_id
+        JOIN stores s ON usa.store_id = s.id
+        WHERE s.name ILIKE $1 AND u.role = 'advisor' AND u.status = 'active'
+        ORDER BY u.last_name, u.first_name
+      `, [`%${storeName}%`]);
+
+      console.log(`📊 Found ${result.rows.length} advisors at ${store.name}`);
+      
+      return {
+        success: true,
+        store: store,
+        advisors: result.rows,
+        count: result.rows.length
+      };
+    } catch (err) {
+      console.error("❌ Error fetching advisors by store name:", err);
+      return {
+        success: false,
+        error: `Database error while searching for advisors at '${storeName}'.`,
+        advisors: []
+      };
+    }
   }
 
   /**

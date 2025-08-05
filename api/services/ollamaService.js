@@ -828,7 +828,15 @@ context.performance?.is_specific_person_query ?
 context.benchmarking?.is_top_performer_query ? 
 `**SPECIAL INSTRUCTION**: This is a top performer query. Focus on the rankings and performance metrics found in the TOP PERFORMERS section.` :
 context.organizational?.is_org_query ? 
-`**SPECIAL INSTRUCTION**: This is an organizational query. Focus on the employee information found in the ORGANIZATIONAL QUERY RESULTS section.` :
+`**SPECIAL INSTRUCTION - ADMIN ORGANIZATIONAL QUERY**: This is an organizational query from an admin user. Provide a DIRECT, COMPLETE response without deflection.
+
+**RESPONSE FORMAT REQUIREMENTS:**
+- For advisor listings: Use format "Advisors at [Store Name]:" followed by bullet points
+- Include full names: "• [First Name] [Last Name] ([role])"
+- If no advisors found: "No advisors were found for the store '[Store Name]'. Please verify the store name and try again."
+- If store not found: "No store found with the name '[Store Name]'. Please double-check the spelling."
+- NO "check with HR" or deflection messages
+- Provide the complete list from the ORGANIZATIONAL QUERY RESULTS section` :
 `Provide insights based on available information. For performance-related questions, direct users to ask specific performance queries that will trigger scorecard API usage.`}`;
 
       return enhancedTemplate;
