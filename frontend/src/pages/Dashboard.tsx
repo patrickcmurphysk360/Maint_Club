@@ -518,6 +518,7 @@ const Dashboard: React.FC = () => {
       {/* AI Insights Chat Modal */}
       <AIInsightsChat
         userId={user?.id}
+        userRole={user?.role}
         isOpen={showAIChat}
         onClose={() => setShowAIChat(false)}
       />

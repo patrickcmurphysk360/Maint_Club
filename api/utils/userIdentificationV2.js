@@ -66,13 +66,47 @@ function extractPotentialNames(query) {
     });
   }
   
-  // Pattern 4b: "for [Name]" at end of query (medium confidence)
+  // Pattern 4b: "for [Name] for [date]" - extract the name before the second "for"
+  const forNameForDateMatch = cleanQuery.match(/for\s+(\w+\s+\w+)\s+for\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|\d{4})/);
+  if (forNameForDateMatch && forNameForDateMatch[1]) {
+    patterns.push({
+      name: forNameForDateMatch[1],
+      confidence: 'high',
+      pattern: 'for_name_for_date'
+    });
+  }
+  
+  // Pattern 4c: "for [Name]" at end of query (medium confidence)
   const forNameEndMatch = cleanQuery.match(/for\s+(\w+\s+\w+)$/);
   if (forNameEndMatch && forNameEndMatch[1]) {
+    // Skip if it looks like a date
+    const isDate = /(?:january|february|march|april|may|june|july|august|september|october|november|december|\d{4})/.test(forNameEndMatch[1]);
+    if (!isDate) {
+      patterns.push({
+        name: forNameEndMatch[1],
+        confidence: 'medium',
+        pattern: 'for_name_end'
+      });
+    }
+  }
+  
+  // Pattern 4c: "with [Name] scorecard" pattern (high confidence)
+  const withNameScorecardMatch = cleanQuery.match(/with\s+(\w+\s+\w+)\s+scorecard/);
+  if (withNameScorecardMatch && withNameScorecardMatch[1]) {
     patterns.push({
-      name: forNameEndMatch[1],
-      confidence: 'medium',
-      pattern: 'for_name_end'
+      name: withNameScorecardMatch[1],
+      confidence: 'high',
+      pattern: 'with_name_scorecard'
+    });
+  }
+  
+  // Pattern 4d: "with [Name]'s scorecard" pattern (high confidence)  
+  const withNamePossessiveMatch = cleanQuery.match(/with\s+(\w+\s+\w+)'?s?\s+scorecard/);
+  if (withNamePossessiveMatch && withNamePossessiveMatch[1]) {
+    patterns.push({
+      name: withNamePossessiveMatch[1],
+      confidence: 'high',
+      pattern: 'with_name_possessive_scorecard'
     });
   }
   

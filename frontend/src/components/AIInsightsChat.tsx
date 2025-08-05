@@ -11,11 +11,12 @@ interface Message {
 
 interface AIInsightsChatProps {
   userId?: number;
+  userRole?: string;
   isOpen: boolean;
   onClose: () => void;
 }
 
-const AIInsightsChat: React.FC<AIInsightsChatProps> = ({ userId, isOpen, onClose }) => {
+const AIInsightsChat: React.FC<AIInsightsChatProps> = ({ userId, userRole, isOpen, onClose }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -98,7 +99,14 @@ const AIInsightsChat: React.FC<AIInsightsChatProps> = ({ userId, isOpen, onClose
     setIsLoading(true);
 
     try {
-      const response = await aiInsightsAPI.chat(userQuery, userId, selectedModel);
+      // Only pass userId for advisor role queries or when specifically asking about "my" data
+      // For admin queries about other users, let the backend identify the user from the query
+      const queryLower = userQuery.toLowerCase();
+      const isPersonalQuery = queryLower.includes(' my ') || queryLower.includes(' me ') || queryLower.startsWith('my ');
+      const isAdminRole = userRole === 'admin' || userRole === 'administrator';
+      const shouldPassUserId = !isAdminRole || isPersonalQuery; // Always pass for non-admins, or for admin personal queries
+      
+      const response = await aiInsightsAPI.chat(userQuery, shouldPassUserId ? userId : undefined, selectedModel);
       addAIMessage(response.response, response.model_used);
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || 'Sorry, I encountered an error. Please try again.';
