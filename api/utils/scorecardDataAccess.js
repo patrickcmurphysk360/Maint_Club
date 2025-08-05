@@ -84,20 +84,9 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
     );
   }
 
-  // Build endpoint URL - detect if running inside Docker container
-  let defaultBaseURL;
-  const fs = require('fs');
-  const isInDocker = fs.existsSync('/.dockerenv') || process.env.DOCKER_CONTAINER === 'true';
-  
-  if (isInDocker) {
-    // Running inside Docker - use internal service name
-    defaultBaseURL = 'http://maintenance-club-api:5000';
-  } else {
-    // Running locally - use external Docker port  
-    defaultBaseURL = 'http://localhost:5002';
-  }
-  
-  const apiBaseURL = baseURL || process.env.API_BASE_URL || defaultBaseURL;
+  // Build endpoint URL - single source of truth
+  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5002';
+  const apiBaseURL = baseURL || defaultBaseURL;
   let endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
   
   // Add query parameters if provided
@@ -335,18 +324,9 @@ function validateDataSource(data) {
  * Health check utility
  */
 async function checkScorecardAPIHealth(baseURL = null) {
-  // Use same Docker detection logic
-  let defaultBaseURL;
-  const fs = require('fs');
-  const isInDocker = fs.existsSync('/.dockerenv') || process.env.DOCKER_CONTAINER === 'true';
-  
-  if (isInDocker) {
-    defaultBaseURL = 'http://maintenance-club-api:5000';
-  } else {
-    defaultBaseURL = 'http://localhost:5002';
-  }
-  
-  const apiBaseURL = baseURL || process.env.API_BASE_URL || defaultBaseURL;
+  // Single source of truth
+  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5002';
+  const apiBaseURL = baseURL || defaultBaseURL;
   
   console.log('🏥 Checking scorecard API health...');
   

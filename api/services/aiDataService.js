@@ -1358,7 +1358,11 @@ class AIDataService {
             if (yearMatch) mtdYear = parseInt(yearMatch[0]);
             else mtdYear = new Date().getFullYear(); // Default to current year
             
-            if (mtdMonth) {
+            // Default to current month if no month specified to avoid historical fake data
+            if (!mtdMonth) {
+              mtdMonth = new Date().getMonth() + 1; // Current month (1-12)
+              console.log(`📅 No month specified, defaulting to current month: ${mtdMonth}/${mtdYear}`);
+            } else {
               console.log(`📅 Extracted date parameters: ${mtdMonth}/${mtdYear}`);
             }
             
@@ -1376,12 +1380,10 @@ class AIDataService {
                   // Let utility determine correct baseURL (Docker internal vs external)
                 };
                 
-                // Add MTD parameters if detected
-                if (mtdMonth && mtdYear) {
-                  scorecardParams.mtdMonth = mtdMonth;
-                  scorecardParams.mtdYear = mtdYear;
-                  console.log(`📊 ADMIN ACCESS: Fetching MTD scorecard for ${mtdMonth}/${mtdYear}`);
-                }
+                // Add MTD parameters (always present now with defaults)
+                scorecardParams.mtdMonth = mtdMonth;
+                scorecardParams.mtdYear = mtdYear;
+                console.log(`📊 ADMIN ACCESS: Fetching MTD scorecard for ${mtdMonth}/${mtdYear}`);
                 
                 const scorecardResult = await getValidatedScorecardData(scorecardParams);
                 

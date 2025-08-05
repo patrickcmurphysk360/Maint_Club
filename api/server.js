@@ -57,11 +57,11 @@ console.log('Database config:', {
 });
 
 const pool = new Pool({
-  user: 'admin',
+  user: process.env.POSTGRES_USER || 'admin',
   host: process.env.POSTGRES_HOST || 'localhost',
-  database: 'maintenance_club_mvp',
-  password: 'ducks2020',
-  port: 5432,
+  database: process.env.POSTGRES_DB || 'maintenance_club_mvp',
+  password: process.env.POSTGRES_PASSWORD || 'ducks2020',
+  port: parseInt(process.env.POSTGRES_PORT) || 5432,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
