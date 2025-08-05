@@ -992,7 +992,13 @@ context.organizational?.is_org_query ?
       store: scorecardData.store,
       metrics: {},
       services: {},
-      goals: {}
+      goals: {},
+      _dataTypes: {
+        note: "CRITICAL: Retail Tires and All Tires are UNIT COUNTS, not currency. Format as '228 units' NOT '$228'",
+        unitFields: ["Retail Tires", "All Tires", "Oil Change", "Alignments", "Brake Service", "Invoices"],
+        currencyFields: ["Sales", "GP Sales"],
+        percentageFields: ["GP Percent", "Tire Protection %"]
+      }
     };
 
     // Include full metrics structure with "Data not available" for missing keys
@@ -1056,7 +1062,7 @@ context.organizational?.is_org_query ?
   }
 
   generateAdminScorecardPrompt(query, context) {
-    const { PROMPT_TEMPLATES, DATA_FORMATTERS } = require('../config/aiPrompts');
+    const { PROMPT_TEMPLATES, DATA_FORMATTERS, formatMetric } = require('../config/aiPrompts');
     
     // Extract scorecard data from validated performance data
     const validatedData = context.performance?.validated_data;

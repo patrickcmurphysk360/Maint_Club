@@ -134,6 +134,7 @@ Analyze the performance data and provide a helpful response to the user's questi
 3. **DO NOT generate fake numbers, fallback text, or placeholder values like "$0", "N/A", or "TPP: 85%" unless those values are present in the data object.**
 4. Assume the data passed in via scorecardData is accurate and pre-validated by the system.
 5. This prompt is being run **at the admin level** — you are allowed to show ALL metrics without disclaimers or warnings.
+6. **CRITICAL TIRE FORMATTING RULE**: "Retail Tires" and "All Tires" are ALWAYS unit counts (example: 228 units). NEVER format these as "$228" or "$228,000". They are NOT revenue values.
 
 ## 📊 INPUT DATA
 
@@ -149,7 +150,11 @@ The validated scorecard data has been provided with the following information:
 1. **If scorecard data is available:**
    - Present the exact metrics from the data object
    - Use the advisor's full name when referencing their data
-   - Format numbers clearly (e.g., $12,500 for retail_tires revenue)
+   - Format numbers by type: Currency ($12,500), Units (1,245 units), Percentages (85%)
+   - CRITICAL: retailTires and allTires are UNIT COUNTS, not currency - format as "1,245 units" NOT "$1,245"
+   - NEVER calculate, infer, or derive values - only show what exists in the data object
+   - NEVER add "(calculated from sales)" or similar derivations
+   - If a tire count is not in the data, say "Data not available" - do NOT convert sales to tire units
    - Compare against goals if provided
    - DO NOT add any data not present in the scorecardData object
 
@@ -165,6 +170,12 @@ The validated scorecard data has been provided with the following information:
    - Use clear headings and bullet points
    - Keep explanations brief and factual
    - Focus on the numbers, not narratives
+
+4. **FORMATTING EXAMPLES:**
+   - Currency: "Sales: $145,537"
+   - Units: "Retail Tires: 228 units" (NOT "$228" or "$228,000")  
+   - Units: "All Tires: 248 units" (NOT "$248" or "$248,000")
+   - Percentages: "GP Percent: 47%"
 
 Remember: You have admin-level access. Show all available data without restrictions or warnings.`,
 
@@ -277,6 +288,56 @@ FORMAT YOUR RESPONSE AS:
   }
 };
 
+// Field type mapping for proper formatting
+const FIELD_TYPES = {
+  // Currency fields (should be formatted with $)
+  currency: [
+    'sales', 'gpSales', 'totalSales', 'totalGpSales', 'averageRO', 'partsGpDollars',
+    'effectiveLaborRate', 'total_sales', 'avg_sales'
+  ],
+  
+  // Unit count fields (should NOT be formatted with $)
+  units: [
+    'retailTires', 'allTires', 'invoices', 'alignments', 'oilChange', 'brakeService',
+    'brakeFlush', 'engineAirFilter', 'cabinAirFilter', 'tireBalance', 'shocksStruts',
+    'tireProtection', 'coolantFlush', 'tireUnits', 'laborHours', 'advisor_count',
+    'totalInvoices', 'storeCount', 'advisorCount'
+  ],
+  
+  // Percentage fields (should be formatted with %)
+  percentage: [
+    'gpPercent', 'tireProtectionPercent', 'brakeFlushToServicePercent', 
+    'potentialAlignmentsPercent', 'partsGpPercent', 'avg_gp_percent'
+  ]
+};
+
+/**
+ * Format a metric value based on its field type
+ * @param {string} fieldName - The name of the field
+ * @param {number|string} value - The value to format
+ * @returns {string} - Properly formatted value
+ */
+function formatMetric(fieldName, value) {
+  if (value === null || value === undefined || value === '') {
+    return 'N/A';
+  }
+  
+  // Check field type and format accordingly
+  if (FIELD_TYPES.currency.includes(fieldName)) {
+    return `$${Number(value).toLocaleString()}`;
+  } else if (FIELD_TYPES.percentage.includes(fieldName)) {
+    return `${value}%`;
+  } else if (FIELD_TYPES.units.includes(fieldName)) {
+    return Number(value).toLocaleString(); // No $ sign for units
+  } else {
+    // Default: assume it's a unit count if it's a number
+    if (typeof value === 'number' || !isNaN(Number(value))) {
+      return Number(value).toLocaleString();
+    }
+    return value;
+  }
+}
+
 // Data formatting helpers
 const DATA_FORMATTERS = {
   // Format performance data for AI consumption
@@ -366,5 +427,7 @@ module.exports = {
   AI_AGENT_CONFIG,
   SYSTEM_PROMPTS,
   PROMPT_TEMPLATES,
-  DATA_FORMATTERS
+  DATA_FORMATTERS,
+  FIELD_TYPES,
+  formatMetric
 };
