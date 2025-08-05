@@ -1368,7 +1368,7 @@ class AIDataService {
                 const scorecardParams = { 
                   level: 'advisor', 
                   id: personId,
-                  baseURL: 'http://localhost:5000' // Force localhost for development
+                  baseURL: 'http://localhost:5002' // Use Docker container port for development
                 };
                 
                 // Add MTD parameters if detected

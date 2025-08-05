@@ -84,8 +84,8 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
     );
   }
 
-  // Build endpoint URL - prioritize localhost for development
-  const apiBaseURL = baseURL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : process.env.API_BASE_URL || 'http://maintenance-club-api:5000');
+  // Build endpoint URL - use Docker container port for development
+  const apiBaseURL = baseURL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5002' : process.env.API_BASE_URL || 'http://maintenance-club-api:5000');
   let endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
   
   // Add query parameters if provided
@@ -117,7 +117,7 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
         service: 'ai-validation-middleware',
         internal: true 
       },
-      process.env.JWT_SECRET || 'fallback_secret',
+      process.env.JWT_SECRET || 'maintenance_club_jwt_secret_change_in_production',
       { expiresIn: '5m' }
     );
 
@@ -323,7 +323,7 @@ function validateDataSource(data) {
  * Health check utility
  */
 async function checkScorecardAPIHealth(baseURL = null) {
-  const apiBaseURL = baseURL || process.env.API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'http://maintenance-club-api:5000');
+  const apiBaseURL = baseURL || process.env.API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5002' : 'http://maintenance-club-api:5000');
   
   console.log('🏥 Checking scorecard API health...');
   
