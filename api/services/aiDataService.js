@@ -879,12 +879,24 @@ class AIDataService {
     }
     
     // Detect role + location queries BEFORE general role queries
-    const roleLocationMatch = lowerQuery.match(/(?:what|which)\s+(managers?|advisors?|employees?)\s+(?:work|are)\s+(?:in|at)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i);
-    if (roleLocationMatch) {
-      const role = roleLocationMatch[1];
-      const storeName = roleLocationMatch[2].trim();
-      console.log(`🔍 Detected role+location query: ${role} at "${storeName}"`);
-      return await this.getStoreEmployeesByRole(storeName, role);
+    // Handle patterns like: "what advisors are working at McDonough", "which managers work in Atlanta store"
+    const roleLocationPatterns = [
+      // Pattern 1: "what/which [role] are working at [location]"
+      /(?:what|which)\s+(managers?|advisors?|employees?)\s+are\s+working\s+(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i,
+      // Pattern 2: "what/which [role] work at [location]" 
+      /(?:what|which)\s+(managers?|advisors?|employees?)\s+work\s+(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i,
+      // Pattern 3: "what/which [role] are at [location]"
+      /(?:what|which)\s+(managers?|advisors?|employees?)\s+are\s+(?:at|in)\s+(?:the\s+)?([a-zA-Z\s]+?)(?:\s+store)?(?:\s*[\?.,!]|$)/i
+    ];
+    
+    for (const pattern of roleLocationPatterns) {
+      const roleLocationMatch = lowerQuery.match(pattern);
+      if (roleLocationMatch) {
+        const role = roleLocationMatch[1];
+        const storeName = roleLocationMatch[2].trim();
+        console.log(`🔍 Detected role+location query: ${role} at "${storeName}"`);
+        return await this.getStoreEmployeesByRole(storeName, role);
+      }
     }
     
     // Detect role-based queries (only if not a location-specific query)
