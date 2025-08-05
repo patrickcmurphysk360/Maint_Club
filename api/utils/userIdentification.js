@@ -64,6 +64,12 @@ function extractPotentialNames(query) {
     patterns.push(hasSoldMatch[1].trim());
   }
   
+  // Pattern 6b: Look for "the scorecard for [name]" patterns
+  const scoreCardForMatch = cleanQuery.match(/(?:the\s+)?scorecard\s+for\s+(\w+\s+\w+)/);
+  if (scoreCardForMatch && scoreCardForMatch[1]) {
+    patterns.push(scoreCardForMatch[1].trim());
+  }
+  
   // Pattern 7: Look for standalone two-word patterns that could be names
   // This helps with queries like "cody lanier retail tire count"
   const words = cleanQuery.split(' ');
@@ -128,12 +134,13 @@ async function lookupUserByName(poolConnection, namePatterns) {
         u.last_name, 
         u.email, 
         u.role,
-        am.spreadsheet_name
+        am.spreadsheet_name,
+        (CASE WHEN u.role = 'advisor' THEN 1 ELSE 0 END) as is_advisor
       FROM users u
       LEFT JOIN advisor_mappings am ON u.id = am.user_id
       WHERE (${conditions.join(' OR ')})
         AND u.status = 'active'
-      ORDER BY u.role = 'advisor' DESC, u.id
+      ORDER BY is_advisor DESC, u.id
       LIMIT 1
     `;
     

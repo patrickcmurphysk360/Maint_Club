@@ -84,8 +84,8 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
     );
   }
 
-  // Build endpoint URL - use internal Docker service name for containerized environments
-  const apiBaseURL = baseURL || process.env.API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'http://maintenance-club-api:5000');
+  // Build endpoint URL - prioritize localhost for development
+  const apiBaseURL = baseURL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : process.env.API_BASE_URL || 'http://maintenance-club-api:5000');
   let endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
   
   // Add query parameters if provided
