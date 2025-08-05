@@ -59,8 +59,16 @@ router.post('/chat', async (req, res) => {
       return res.status(400).json({ message: 'Query is required' });
     }
 
-    // Use current user if no specific userId provided
-    const targetUserId = userId || req.user.id;
+    // Import user identification utility (V2 - improved version)
+    const { identifyUserFromQuery } = require('../utils/userIdentificationV2');
+    
+    // Try to identify the user from the query if no specific userId provided
+    let targetUserId = userId;
+    if (!userId) {
+      const identifiedUser = await identifyUserFromQuery(pool, query, req.user);
+      targetUserId = identifiedUser.id;
+      console.log(`🤖 AI identified target user: ${identifiedUser.first_name} ${identifiedUser.last_name} (ID: ${targetUserId})`);
+    }
     
     // Permission check - advisors can only query their own data, admins can query anyone
     if (req.user.role === 'advisor' && targetUserId !== req.user.id) {
@@ -102,9 +110,42 @@ router.post('/chat', async (req, res) => {
     console.log('🛡️ POLICY COMPLIANCE: Using validated scorecard utility for performance data');
     const { getValidatedScorecardData } = require('../utils/scorecardDataAccess');
     
+    // Parse date from query if present
+    let mtdMonth = null;
+    let mtdYear = null;
+    
+    // Check for month/year patterns in the query
+    const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+    const queryLower = query.toLowerCase();
+    
+    // Look for month name and year
+    monthNames.forEach((month, index) => {
+      if (queryLower.includes(month)) {
+        mtdMonth = index + 1;
+        // Look for year after month
+        const yearMatch = queryLower.match(new RegExp(month + '\\s+(\\d{4})'));
+        if (yearMatch) {
+          mtdYear = parseInt(yearMatch[1]);
+        }
+      }
+    });
+    
+    // If no year found, use current year
+    if (mtdMonth && !mtdYear) {
+      mtdYear = new Date().getFullYear();
+    }
+    
+    console.log(`📅 Detected date parameters from query: mtdMonth=${mtdMonth}, mtdYear=${mtdYear}`);
+    
     let performanceResult = { rows: [] };
     try {
-      const scorecardResult = await getValidatedScorecardData({ level: 'advisor', id: targetUserId });
+      const scorecardParams = { level: 'advisor', id: targetUserId };
+      if (mtdMonth && mtdYear) {
+        scorecardParams.mtdMonth = mtdMonth;
+        scorecardParams.mtdYear = mtdYear;
+      }
+      
+      const scorecardResult = await getValidatedScorecardData(scorecardParams);
       
       // Convert to legacy format for backward compatibility
       if (scorecardResult.success) {
@@ -162,10 +203,12 @@ router.post('/chat', async (req, res) => {
       query: query,
       response: aiResponse.response,
       context_user: context.user.name,
+      context_user_id: targetUserId,
       context_timeframe: context.performance?.timeframe || context.timeframe,
       context_type: context.business_intelligence ? 'enhanced' : 'basic',
       model_used: aiResponse.model,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      query_about_different_user: targetUserId !== req.user.id
     };
 
     // Add validation metadata if available

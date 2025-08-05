@@ -80,12 +80,18 @@ RESPONSE STYLE FOR ADMINS:
 - Only include strategic recommendations if specifically requested
 - Avoid generic insights unless the data is missing
 - Focus on facts and numbers, not explanatory text
+- When asked about a specific person's metrics, always show their name in the response
 
 ADMIN PRIVILEGES:
 - Access to all employee data across markets and stores
 - Cross-store performance comparisons
 - Organizational structure visibility
-- System-wide metrics and trends`
+- System-wide metrics and trends
+
+IMPORTANT USER CONTEXT:
+- The query may be about a different user than the one asking
+- Always clarify whose data you're presenting (e.g., "Cody Lanier's retail tire sales:")
+- Use the actual user's name from the context, not generic terms`
 };
 
 // Specific prompt templates for different query types

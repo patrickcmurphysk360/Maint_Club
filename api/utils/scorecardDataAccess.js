@@ -56,10 +56,14 @@ class ScorecardDataAccessError extends Error {
  * @param {number|string} params.id - Entity ID
  * @param {string} [params.baseURL] - Override base URL (default from env)
  * @param {number} [params.timeout] - Request timeout in ms (default 10000)
+ * @param {number} [params.mtdMonth] - Month for MTD data (1-12)
+ * @param {number} [params.mtdYear] - Year for MTD data
+ * @param {string} [params.startDate] - Start date for range queries
+ * @param {string} [params.endDate] - End date for range queries
  * @returns {Promise<Object>} Validated scorecard data
  * @throws {ScorecardDataAccessError} When API fails or data is invalid
  */
-async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 10000 }) {
+async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 10000, mtdMonth = null, mtdYear = null, startDate = null, endDate = null }) {
   // Input validation
   if (!level || !id) {
     throw new ScorecardDataAccessError(
@@ -82,7 +86,21 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
 
   // Build endpoint URL - use internal Docker service name for containerized environments
   const apiBaseURL = baseURL || process.env.API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'http://maintenance-club-api:5000');
-  const endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
+  let endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
+  
+  // Add query parameters if provided
+  const queryParams = [];
+  if (mtdMonth && mtdYear) {
+    queryParams.push(`mtdMonth=${mtdMonth}`);
+    queryParams.push(`mtdYear=${mtdYear}`);
+  } else if (startDate || endDate) {
+    if (startDate) queryParams.push(`startDate=${startDate}`);
+    if (endDate) queryParams.push(`endDate=${endDate}`);
+  }
+  
+  if (queryParams.length > 0) {
+    endpoint += '?' + queryParams.join('&');
+  }
   
   console.log(`📊 POLICY ENFORCEMENT: Accessing validated scorecard data`);
   console.log(`   Level: ${normalizedLevel}`);
