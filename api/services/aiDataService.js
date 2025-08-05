@@ -1302,8 +1302,13 @@ class AIDataService {
           let personPerfMatch = lowerQuery.match(/(?:what\s+(?:is|does|are)|how\s+(?:is|does|are))\s+([a-zA-Z\s]+?)(?:'s|\s+)(?:performance|doing|sales|numbers)/i);
           
           if (!personPerfMatch) {
-            // Pattern: "Get [Name]'s scorecard" or "Show me [Name] scorecard"
-            personPerfMatch = lowerQuery.match(/(?:get|show\s+(?:me\s+)?|give\s+(?:me\s+)?)\s+([a-zA-Z\s]+?)(?:'s|s')?\s+(?:complete\s+)?(?:scorecard|score\s+card|metrics|performance|breakdown)/i);
+            // Pattern: "Show me [Name] scorecard" 
+            personPerfMatch = lowerQuery.match(/show\s+me\s+([a-zA-Z\s]+?)\s+scorecard/i);
+          }
+          
+          if (!personPerfMatch) {
+            // Pattern: "Get [Name] scorecard" 
+            personPerfMatch = lowerQuery.match(/(?:get|give\s+me)\s+([a-zA-Z\s]+?)\s+scorecard/i);
           }
           
           if (!personPerfMatch) {
@@ -1367,8 +1372,8 @@ class AIDataService {
                 // Use VALIDATED scorecard utility with date parameters for MTD data
                 const scorecardParams = { 
                   level: 'advisor', 
-                  id: personId,
-                  baseURL: 'http://localhost:5002' // Use Docker container port for development
+                  id: personId
+                  // Let utility determine correct baseURL (Docker internal vs external)
                 };
                 
                 // Add MTD parameters if detected
@@ -1404,8 +1409,8 @@ class AIDataService {
           try {
             const scorecardResult = await getValidatedScorecardData({ 
               level: 'advisor', 
-              id: userId,
-              baseURL: 'http://localhost:5000' // Force localhost for development
+              id: userId
+              // Let utility determine correct baseURL (Docker internal vs external)
             });
             
             performanceData = {

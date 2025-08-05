@@ -1061,7 +1061,17 @@ context.organizational?.is_org_query ?
     // Extract scorecard data from validated performance data
     const validatedData = context.performance?.validated_data;
     
+    console.log('🔍 ADMIN PROMPT DEBUG:');
+    console.log('   validatedData exists:', !!validatedData);
+    console.log('   validatedData.success:', validatedData?.success);
+    console.log('   validatedData.data exists:', !!validatedData?.data);
+    if (validatedData?.data) {
+      console.log('   validatedData.data keys:', Object.keys(validatedData.data));
+      console.log('   validatedData.data.metrics:', JSON.stringify(validatedData.data.metrics || {}, null, 2));
+    }
+    
     if (!validatedData || !validatedData.success || !validatedData.data) {
+      console.log('❌ ADMIN PROMPT: No validated data - returning "no data" message');
       // No data available - use admin template with explicit null and stricter instructions
       return PROMPT_TEMPLATES.adminScorecard.template
         .replace('{scorecardData}', 'null')
