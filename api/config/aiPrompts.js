@@ -122,6 +122,56 @@ Analyze the performance data and provide a helpful response to the user's questi
   },
 
   // Automated insights
+  // Admin-specific scorecard template
+  adminScorecard: {
+    template: `You are a performance AI assistant embedded in a web platform. You are serving an **admin user** who is requesting **validated performance scorecard data** for employees across multiple stores.
+
+## 🧠 CORE RULES
+
+1. **DO NOT fabricate, estimate, or infer data.**
+2. If data is missing, say:  
+   > "⚠️ No scorecard data available for this advisor."
+3. **DO NOT generate fake numbers, fallback text, or placeholder values like "$0", "N/A", or "TPP: 85%" unless those values are present in the data object.**
+4. Assume the data passed in via scorecardData is accurate and pre-validated by the system.
+5. This prompt is being run **at the admin level** — you are allowed to show ALL metrics without disclaimers or warnings.
+
+## 📊 INPUT DATA
+
+The validated scorecard data has been provided with the following information:
+{scorecardData}
+
+## 🎯 USER QUERY
+
+{userQuery}
+
+## 📋 RESPONSE INSTRUCTIONS
+
+1. **If scorecard data is available:**
+   - Present the exact metrics from the data object
+   - Use the advisor's full name when referencing their data
+   - Format numbers clearly (e.g., $12,500 for retail_tires revenue)
+   - Compare against goals if provided
+   - DO NOT add any data not present in the scorecardData object
+
+2. **If scorecard data is missing or null:**
+   - State clearly: "⚠️ No validated scorecard data was found for [advisor] in [month]."
+   - DO NOT attempt to fill in missing values
+   - DO NOT suggest checking elsewhere or contacting IT
+   - DO NOT make up any numbers, percentages, or dollar amounts
+   - DO NOT provide estimates, approximations, or sample data
+
+3. **Response format:**
+   - Lead with the requested metrics
+   - Use clear headings and bullet points
+   - Keep explanations brief and factual
+   - Focus on the numbers, not narratives
+
+Remember: You have admin-level access. Show all available data without restrictions or warnings.`,
+
+    variables: ['scorecardData', 'userQuery'],
+    role: 'admin'
+  },
+
   insights: {
     general: `${SYSTEM_PROMPTS.base}
 
@@ -243,6 +293,42 @@ const DATA_FORMATTERS = {
     }
     
     return formatted.join('\n');
+  },
+
+  // Format scorecard data for admin AI consumption
+  formatScorecardData: (scorecardData) => {
+    if (!scorecardData || !scorecardData.metrics) {
+      return null; // Return null to trigger missing data response
+    }
+
+    // Structure the data in a clear JSON format for the AI
+    const formatted = {
+      advisor: scorecardData.advisor || scorecardData.advisorName || 'Unknown',
+      month: scorecardData.month || scorecardData.period || 'Unknown',
+      store: scorecardData.store || scorecardData.storeName || 'Unknown',
+      metrics: {},
+      goals: {}
+    };
+
+    // Copy only actual metric values (no fabrication)
+    if (scorecardData.metrics) {
+      Object.entries(scorecardData.metrics).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formatted.metrics[key] = value;
+        }
+      });
+    }
+
+    // Copy goals if available
+    if (scorecardData.goals) {
+      Object.entries(scorecardData.goals).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formatted.goals[key] = value;
+        }
+      });
+    }
+
+    return JSON.stringify(formatted, null, 2);
   },
 
   // Format goals data

@@ -295,6 +295,13 @@ class ScorecardFieldValidator {
    * Check if query should trigger scorecard validation
    */
   shouldValidate(query, contextData) {
+    // ADMIN BYPASS: Never validate for admin users
+    const isAdmin = contextData?.user?.role === 'admin' || contextData?.user?.role === 'administrator';
+    if (isAdmin) {
+      console.log('🔓 ADMIN BYPASS: Skipping field validation for admin user');
+      return false;
+    }
+    
     // Always validate if performance intent is detected
     if (contextData?.performance?.is_performance_query) {
       return true;

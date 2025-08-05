@@ -6,7 +6,7 @@ const AIValidationMiddleware = require('../middleware/aiValidationMiddleware');
 
 class OllamaService {
   constructor(pool = null) {
-    this.baseURL = process.env.OLLAMA_HOST || 'http://ollama:11434';
+    this.baseURL = process.env.OLLAMA_HOST || 'http://localhost:11434';
     this.defaultModel = process.env.OLLAMA_MODEL || AI_AGENT_CONFIG.models.default;
     this.pool = pool;
     this.aiDataService = pool ? new AIDataService(pool) : null;
@@ -135,8 +135,12 @@ class OllamaService {
           done: response.data.done
         };
 
-        // ENHANCED SCORECARD VALIDATION: Multiple validation layers
-        if (userId && query && this.scorecardValidator.shouldValidate(query, contextData)) {
+        // ADMIN OVERRIDE: Skip validation for authenticated admin users
+        const isAdmin = contextData?.user?.role === 'admin' || contextData?.user?.role === 'administrator';
+        if (userId && query && isAdmin) {
+          console.log('🔓 ADMIN OVERRIDE: Skipping validation middleware for admin user');
+          finalResponse.validation = { status: 'admin_override', adminAccess: true };
+        } else if (userId && query && this.scorecardValidator.shouldValidate(query, contextData)) {
           console.log('🛡️ Running comprehensive AI response validation...');
           
           // Layer 1: Original field whitelist validation
@@ -512,6 +516,15 @@ class OllamaService {
 
   generateEnhancedPrompt(query, context) {
     try {
+      // Admin scorecard-specific handling
+      const isAdmin = context.user?.role === 'admin' || context.user?.role === 'administrator';
+      const isPerformanceQuery = context.performance?.is_performance_query;
+      
+      // Use admin scorecard prompt for admin users with performance queries
+      if (isAdmin && isPerformanceQuery && context.performance?.validated_data) {
+        return this.generateAdminScorecardPrompt(query, context);
+      }
+      
       // Handle store ranking queries specially
       if (context.queryType === 'store_rankings' && context.storeRankings) {
         const rankings = context.storeRankings;
@@ -569,25 +582,100 @@ Data Integrity: ${validatedData.metadata.dataIntegrity}`;
           }
             
           const scorecardData = validatedData.data;
-          contextInfo += `
+          const metrics = scorecardData.metrics || {};
+          const services = scorecardData.services || {};
+          
+          // Admin users get raw data without placeholders
+          const isAdmin = context.user?.role === 'admin' || context.user?.role === 'administrator';
+          
+          if (isAdmin) {
+            contextInfo += `
 
-**AUTHORIZED PERFORMANCE METRICS:**
-- Sales: $${scorecardData.sales?.toLocaleString() || 'N/A'}
-- GP Sales: $${scorecardData.gpSales?.toLocaleString() || 'N/A'} (${scorecardData.gpPercent || 'N/A'}%)
-- Invoices: ${scorecardData.invoices || 'N/A'}
-- Alignments: ${scorecardData.alignments || 'N/A'}
-- Oil Changes: ${scorecardData.oilChange || 'N/A'}
-- Retail Tires: ${scorecardData.retailTires || 'N/A'}`;
+**🔒 ADMIN COMPLETE SCORECARD DATA:**`;
+            
+            // Only show metrics that actually exist - no placeholders
+            if (metrics.sales !== undefined && metrics.sales !== null) {
+              contextInfo += `\n- **Sales**: $${metrics.sales.toLocaleString()}`;
+            }
+            if (metrics.gpSales !== undefined && metrics.gpSales !== null) {
+              contextInfo += `\n- **GP Sales**: $${metrics.gpSales.toLocaleString()}`;
+              if (metrics.gpPercent !== undefined && metrics.gpPercent !== null) {
+                contextInfo += ` (${metrics.gpPercent}%)`;
+              }
+            }
+            if (metrics.invoices !== undefined && metrics.invoices !== null) {
+              contextInfo += `\n- **Invoices**: ${metrics.invoices}`;
+            }
+            
+            // Services - only show if they exist
+            Object.entries(services).forEach(([serviceName, value]) => {
+              if (value !== undefined && value !== null) {
+                contextInfo += `\n- **${serviceName}**: ${value}`;
+              }
+            });
+            
+            // Average spend only if both values exist
+            if (metrics.sales && metrics.invoices) {
+              contextInfo += `\n- **Average Spend**: $${(metrics.sales / metrics.invoices).toFixed(2)}`;
+            }
+          } else {
+            // Non-admin users get the original format with N/A placeholders
+            contextInfo += `
+
+**🔒 ADMIN COMPLETE SCORECARD DATA:**
+- **Sales**: $${metrics.sales?.toLocaleString() || 'N/A'}
+- **GP Sales**: $${metrics.gpSales?.toLocaleString() || 'N/A'} (${metrics.gpPercent || 'N/A'}%)
+- **Invoices**: ${metrics.invoices || 'N/A'}
+- **Alignments**: ${services['Alignments'] || 'N/A'}
+- **Oil Changes**: ${services['Oil Change'] || 'N/A'}
+- **Retail Tires**: ${services['Retail Tires'] || 'N/A'}
+- **All Tires**: ${services['All Tires'] || 'N/A'}
+- **Brake Service**: ${services['Brake Service'] || 'N/A'}
+- **Tire Protection**: ${services['Tire Protection'] || 'N/A'} (${services['Tire Protection %'] || 'N/A'}%)
+- **Tire Balance**: ${services['Tire Balance'] || 'N/A'}
+- **Brake Flush**: ${services['Brake Flush'] || 'N/A'}
+- **Engine Air Filter**: ${services['Engine Air Filter'] || 'N/A'}
+- **Cabin Air Filter**: ${services['Cabin Air Filter'] || 'N/A'}
+- **Coolant Flush**: ${services['Coolant Flush'] || 'N/A'}
+- **Shocks & Struts**: ${services['Shocks & Struts'] || 'N/A'}
+- **Average Spend**: $${(metrics.sales && metrics.invoices ? (metrics.sales / metrics.invoices).toFixed(2) : 'N/A')}`;
+          }
 
           // Show advanced calculated metrics if available
-          if (scorecardData.tpp) {
-            contextInfo += `
-- TPP (Tickets Per Pit): ${scorecardData.tpp} [CALCULATED BY SCORECARD SYSTEM]`;
+          if (isAdmin) {
+            // Admin: Only show if all required data exists
+            if (services['Potential Alignments %'] !== undefined && services['Potential Alignments %'] !== null) {
+              contextInfo += `\n- **Potential Alignments %**: ${services['Potential Alignments %']}%`;
+              if (services['Potential Alignments Sold'] !== undefined && services['Potential Alignments'] !== undefined) {
+                contextInfo += ` (${services['Potential Alignments Sold']}/${services['Potential Alignments']})`;
+              }
+            }
+            
+            if (services['Brake Flush to Service %'] !== undefined && services['Brake Flush to Service %'] !== null) {
+              contextInfo += `\n- **Brake Flush to Service %**: ${services['Brake Flush to Service %']}%`;
+            }
+          } else {
+            // Non-admin: Original format with N/A
+            if (services['Potential Alignments %']) {
+              contextInfo += `
+- **Potential Alignments %**: ${services['Potential Alignments %']}% (${services['Potential Alignments Sold'] || 'N/A'}/${services['Potential Alignments'] || 'N/A'})`;
+            }
+            
+            if (services['Brake Flush to Service %']) {
+              contextInfo += `
+- **Brake Flush to Service %**: ${services['Brake Flush to Service %']}%`;
+            }
           }
           
-          if (scorecardData.pat) {
+          // Show goals if available
+          if (scorecardData.goals && Object.keys(scorecardData.goals).length > 0) {
             contextInfo += `
-- PAT (Parts Attach Rate): ${scorecardData.pat} [CALCULATED BY SCORECARD SYSTEM]`;
+
+**CURRENT GOALS:**`;
+            Object.entries(scorecardData.goals).forEach(([metric, goal]) => {
+              contextInfo += `
+- **${metric}**: Target ${goal.target} (${goal.periodType})`;
+            });
           }
           
           if (scorecardData.fluid_attach_rates || scorecardData.fluidAttachRates) {
@@ -602,20 +690,39 @@ Data Integrity: ${validatedData.metadata.dataIntegrity}`;
           }
           
         } else if (validatedData && !validatedData.success) {
-          contextInfo += `
-**🚫 SCORECARD API ERROR:** ${validatedData.error}
-Source: ${validatedData.metadata?.source || 'validated_scorecard_api'}
-Policy Status: Data access attempted but failed`;
+          if (isAdmin) {
+            // Admin: Raw error info only
+            contextInfo += `\n**Scorecard API Error**: ${validatedData.error}`;
+            if (validatedData.metadata?.endpoint) {
+              contextInfo += `\nEndpoint: ${validatedData.metadata.endpoint}`;
+            }
+          } else {
+            // Non-admin: Full error messaging
+            contextInfo += `
+**❌ ADMIN ERROR - API FAILURE:** ${validatedData.error}
+Endpoint: ${validatedData.metadata?.endpoint || 'Unknown'}
+Admin Override: Contact system administrator immediately`;
+          }
         } else {
-          contextInfo += `
-**🚫 SCORECARD DATA UNAVAILABLE:** No validated data retrieved
-Policy Status: Performance query detected but no authorized data available`;
+          if (isAdmin) {
+            // Admin: Simple no data message
+            contextInfo += `\n**No scorecard data available**`;
+          } else {
+            // Non-admin: Full error messaging
+            contextInfo += `
+**❌ ADMIN ERROR - NO DATA:** Scorecard API returned no data
+Expected: Complete advisor scorecard with all metrics
+Admin Override: Verify API connectivity and user permissions`;
+          }
         }
       } else if (context.performance?.is_performance_query) {
-        contextInfo += `
+        if (!isAdmin) {
+          // Only show policy violation for non-admin users
+          contextInfo += `
 **🚫 POLICY VIOLATION:** Performance query detected but no policy-compliant data
 Enforcement Level: ${context.performance?.enforcement_level || 'unknown'}
 Raw Spreadsheet Access: ${context.performance?.raw_spreadsheet_access ? 'ENABLED (VIOLATION)' : 'DISABLED (COMPLIANT)'}`;
+        }
       } else {
         contextInfo += `
 **PERFORMANCE DATA:** Not a performance-related query - no scorecard access required`;
@@ -650,13 +757,29 @@ ${goalsSection}`;
 
         // Only show market performance data if NOT a specific person query (to avoid confusion)
         if (bi.market_performance && bi.market_performance.length > 0 && !context.performance?.is_specific_person_query) {
+          const isAdmin = context.user?.role === 'admin' || context.user?.role === 'administrator';
           contextInfo += `
 
 **MARKET PERFORMANCE DATA (Latest MTD Spreadsheet):**`;
           bi.market_performance.slice(0, 3).forEach(perf => {
             const uploadMonth = new Date(perf.upload_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-            contextInfo += `
+            if (isAdmin) {
+              // Admin: Only show actual values
+              contextInfo += `\n- ${perf.market_name} - ${uploadMonth} MTD:`;
+              if (perf.total_sales !== undefined && perf.total_sales !== null) {
+                contextInfo += ` $${perf.total_sales.toLocaleString()} total sales`;
+              }
+              if (perf.advisor_count !== undefined && perf.advisor_count !== null) {
+                contextInfo += `, ${perf.advisor_count} advisors`;
+              }
+              if (perf.avg_gp_percent !== undefined && perf.avg_gp_percent !== null) {
+                contextInfo += `, ${perf.avg_gp_percent.toFixed(1)}% avg GP`;
+              }
+            } else {
+              // Non-admin: Original with N/A
+              contextInfo += `
 - ${perf.market_name} - ${uploadMonth} MTD: $${perf.total_sales?.toLocaleString() || 'N/A'} total sales, ${perf.advisor_count} advisors, ${perf.avg_gp_percent?.toFixed(1) || 'N/A'}% avg GP`;
+            }
           });
         }
 
@@ -717,12 +840,22 @@ ${goalsSection}`;
 
       // Add top performers if available
       if (context.benchmarking?.top_performers && context.benchmarking.top_performers.length > 0) {
+        const isAdmin = context.user?.role === 'admin' || context.user?.role === 'administrator';
         contextInfo += `
 
 **TOP PERFORMERS (Latest MTD):**`;
         context.benchmarking.top_performers.forEach((performer, index) => {
-          contextInfo += `
+          if (isAdmin) {
+            // Admin: Only show actual values
+            contextInfo += `\n${index + 1}. ${performer.advisor_name} (${performer.store}): ${performer.metric_value} units`;
+            if (performer.total_sales !== undefined && performer.total_sales !== null) {
+              contextInfo += ` - $${performer.total_sales.toLocaleString()} total sales`;
+            }
+          } else {
+            // Non-admin: Original with N/A
+            contextInfo += `
 ${index + 1}. ${performer.advisor_name} (${performer.store}): ${performer.metric_value} units - $${performer.total_sales?.toLocaleString() || 'N/A'} total sales`;
+          }
         });
       }
 
@@ -846,6 +979,138 @@ context.organizational?.is_org_query ?
       // Fall back to basic prompt
       return this.generatePerformancePrompt(query, context);
     }
+  }
+
+  formatAdminScorecardData(scorecardData) {
+    if (!scorecardData) {
+      return 'null';
+    }
+
+    const formatted = {
+      advisor: scorecardData.advisor,
+      month: scorecardData.month,
+      store: scorecardData.store,
+      metrics: {},
+      services: {},
+      goals: {}
+    };
+
+    // Include full metrics structure with "Data not available" for missing keys
+    const expectedMetrics = ['sales', 'gpSales', 'gpPercent', 'invoices'];
+    expectedMetrics.forEach(key => {
+      if (scorecardData.metrics && scorecardData.metrics[key] !== undefined && scorecardData.metrics[key] !== null) {
+        formatted.metrics[key] = scorecardData.metrics[key];
+      } else {
+        formatted.metrics[key] = "Data not available";
+      }
+    });
+
+    // Include additional metrics that exist
+    if (scorecardData.metrics) {
+      Object.entries(scorecardData.metrics).forEach(([key, value]) => {
+        if (!expectedMetrics.includes(key) && value !== null && value !== undefined) {
+          formatted.metrics[key] = value;
+        }
+      });
+    }
+
+    // Include full services structure with "Data not available" for missing keys
+    const expectedServices = ['Oil Change', 'Alignments', 'Retail Tires', 'All Tires', 'Brake Service', 'Tire Protection', 'Brake Flush', 'Engine Air Filter', 'Cabin Air Filter'];
+    expectedServices.forEach(key => {
+      if (scorecardData.services && scorecardData.services[key] !== undefined && scorecardData.services[key] !== null) {
+        formatted.services[key] = scorecardData.services[key];
+      } else {
+        formatted.services[key] = "Data not available";
+      }
+    });
+
+    // Include additional services that exist
+    if (scorecardData.services) {
+      Object.entries(scorecardData.services).forEach(([key, value]) => {
+        if (!expectedServices.includes(key) && value !== null && value !== undefined) {
+          formatted.services[key] = value;
+        }
+      });
+    }
+
+    // Copy goals as-is (only include what exists)
+    if (scorecardData.goals) {
+      Object.entries(scorecardData.goals).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          // Flatten goal objects to simple target values for cleaner JSON
+          if (typeof value === 'object' && value.target !== undefined) {
+            formatted.goals[key] = value.target;
+          } else {
+            formatted.goals[key] = value;
+          }
+        }
+      });
+    }
+
+    try {
+      return JSON.stringify(formatted, null, 2);
+    } catch (error) {
+      console.error('❌ Error formatting admin scorecard data to JSON:', error);
+      return 'null';
+    }
+  }
+
+  generateAdminScorecardPrompt(query, context) {
+    const { PROMPT_TEMPLATES, DATA_FORMATTERS } = require('../config/aiPrompts');
+    
+    // Extract scorecard data from validated performance data
+    const validatedData = context.performance?.validated_data;
+    
+    if (!validatedData || !validatedData.success || !validatedData.data) {
+      // No data available - use admin template with explicit null and stricter instructions
+      return PROMPT_TEMPLATES.adminScorecard.template
+        .replace('{scorecardData}', 'null')
+        .replace('{userQuery}', query + '\n\nIMPORTANT: The scorecardData object is null. You MUST respond with the exact message: "⚠️ No validated scorecard data was found for this advisor." DO NOT fabricate any numbers.');
+    }
+    
+    // Format scorecard data for admin consumption - preserve original structure
+    const scorecardData = {
+      advisor: context.performance?.specific_person_name || validatedData.data.advisorName || context.user?.name || 'Unknown',
+      month: validatedData.data.month || validatedData.data.period || 'Current',
+      store: validatedData.data.store || validatedData.data.storeName || context.user?.store || 'Unknown',
+      metrics: {},
+      services: {},
+      goals: {}
+    };
+    
+    // Copy metrics if present (sales, gpSales, invoices, etc.)
+    if (validatedData.data.metrics) {
+      Object.entries(validatedData.data.metrics).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          scorecardData.metrics[key] = value;
+        }
+      });
+    }
+    
+    // Copy services separately with original keys (Oil Change, Alignments, etc.)
+    if (validatedData.data.services) {
+      Object.entries(validatedData.data.services).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          scorecardData.services[key] = value;
+        }
+      });
+    }
+    
+    // Copy goals if present
+    if (validatedData.data.goals) {
+      Object.entries(validatedData.data.goals).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          scorecardData.goals[key] = value;
+        }
+      });
+    }
+    
+    // Format the complete scorecard data
+    const formattedData = this.formatAdminScorecardData(scorecardData);
+    
+    return PROMPT_TEMPLATES.adminScorecard.template
+      .replace('{scorecardData}', formattedData)
+      .replace('{userQuery}', query);
   }
 
   generatePerformancePrompt(query, context) {

@@ -77,6 +77,14 @@ class AIValidationMiddleware {
         }
       };
 
+      // ADMIN BYPASS: Skip validation for admin users
+      const isAdmin = contextData?.user?.role === 'admin' || contextData?.user?.role === 'administrator';
+      if (isAdmin) {
+        console.log('🔓 ADMIN BYPASS: Skipping validation middleware for admin user');
+        validationResult.auditLog.validationType = 'admin_bypass';
+        return validationResult;
+      }
+
       // Check if this is a performance-related query
       if (!this.isPerformanceQuery(query)) {
         console.log('🔍 Non-performance query detected, skipping metric validation');
@@ -429,7 +437,8 @@ class AIValidationMiddleware {
    * Rephrase AI response with corrections and disclaimers
    */
   async rephraseResponse(originalResponse, validationResult) {
-    if (validationResult.isValid) {
+    // Always return original response if validation passed or it's an admin bypass
+    if (validationResult.isValid || validationResult.auditLog?.validationType === 'admin_bypass') {
       return originalResponse;
     }
 

@@ -145,7 +145,18 @@ router.post('/chat', async (req, res) => {
         scorecardParams.mtdYear = mtdYear;
       }
       
+      console.log(`🔄 ADMIN SCORECARD REQUEST: ${JSON.stringify(scorecardParams)}`);
       const scorecardResult = await getValidatedScorecardData(scorecardParams);
+      
+      console.log(`📊 SCORECARD API RESPONSE: ${JSON.stringify({
+        success: scorecardResult.success,
+        hasData: !!scorecardResult.data,
+        userId: scorecardResult.data?.userId,
+        metricsCount: scorecardResult.data?.metrics ? Object.keys(scorecardResult.data.metrics).length : 0,
+        servicesCount: scorecardResult.data?.services ? Object.keys(scorecardResult.data.services).length : 0,
+        endpoint: scorecardResult.metadata?.endpoint,
+        error: scorecardResult.error
+      })}`);
       
       // Convert to legacy format for backward compatibility
       if (scorecardResult.success) {
@@ -154,7 +165,9 @@ router.post('/chat', async (req, res) => {
           data: scorecardResult.data,
           store_id: null // Not available in validated scorecard format
         }];
-        console.log('✅ Using validated scorecard data for AI insights');
+        console.log('✅ ADMIN: Using complete validated scorecard data for AI insights');
+      } else {
+        console.error('❌ ADMIN: Scorecard API failed:', scorecardResult.error);
       }
     } catch (error) {
       console.error('⚠️ POLICY ENFORCEMENT: Could not get scorecard data:', error.message);
@@ -175,7 +188,18 @@ router.post('/chat', async (req, res) => {
     const ollama = new OllamaService(pool);
 
     // Build enhanced context with all business intelligence
+    // CRITICAL: Pass requesting user info for admin detection
     const context = await ollama.buildEnhancedContext(targetUserId, query);
+    
+    // Override user context with requesting user info for admin privileges
+    context.user = {
+      ...context.user,
+      requestingUserId: req.user.id,
+      requestingUserRole: req.user.role,
+      requestingUserEmail: req.user.email,
+      // For admin users, use admin role for prompt generation
+      role: req.user.role === 'admin' || req.user.role === 'administrator' ? req.user.role : context.user.role
+    };
 
     // Generate enhanced AI prompt
     const prompt = context.business_intelligence 
