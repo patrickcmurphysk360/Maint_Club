@@ -66,6 +66,16 @@ function extractPotentialNames(query) {
     });
   }
   
+  // Pattern 4b: "for [Name]" at end of query (medium confidence)
+  const forNameEndMatch = cleanQuery.match(/for\s+(\w+\s+\w+)$/);
+  if (forNameEndMatch && forNameEndMatch[1]) {
+    patterns.push({
+      name: forNameEndMatch[1],
+      confidence: 'medium',
+      pattern: 'for_name_end'
+    });
+  }
+  
   // Pattern 5: Capitalized names at the beginning of query
   const startNameMatch = originalQuery.match(/^(?:show\s+me\s+|get\s+|what\s+(?:is|are)\s+)?([A-Z][a-z]+\s+[A-Z][a-z]+)/);
   if (startNameMatch && startNameMatch[1]) {
@@ -123,8 +133,9 @@ async function lookupUserByName(poolConnection, namePatterns) {
     for (const pattern of sortedPatterns) {
       const parts = pattern.name.toLowerCase().split(' ');
       if (parts.length >= 2) {
-        const query = `
-          SELECT DISTINCT
+        // First try exact match
+        let query = `
+          SELECT 
             u.id, 
             u.first_name, 
             u.last_name, 
@@ -138,12 +149,42 @@ async function lookupUserByName(poolConnection, namePatterns) {
             (LOWER(u.first_name) = $2 AND LOWER(u.last_name) = $1)
           )
           AND u.status = 'active'
-          ORDER BY u.role = 'advisor' DESC, u.id
+          ORDER BY CASE WHEN u.role = 'advisor' THEN 0 ELSE 1 END, u.id
           LIMIT 1
         `;
         
         console.log(`🔍 Looking up user: "${pattern.name}" (${pattern.confidence} confidence, ${pattern.pattern})`);
-        const result = await poolConnection.query(query, [parts[0], parts[1]]);
+        let result = await poolConnection.query(query, [parts[0], parts[1]]);
+        
+        // If no exact match, try fuzzy matching for common misspellings
+        if (result.rows.length === 0) {
+          console.log(`🔍 Trying fuzzy match for: "${pattern.name}"`);
+          
+          // Simple LIKE matching for common misspellings
+          query = `
+            SELECT 
+              u.id, 
+              u.first_name, 
+              u.last_name, 
+              u.email, 
+              u.role,
+              am.spreadsheet_name
+            FROM users u
+            LEFT JOIN advisor_mappings am ON u.id = am.user_id
+            WHERE (
+              (LOWER(u.first_name) LIKE $1 AND LOWER(u.last_name) = $2) OR
+              (LOWER(u.first_name) LIKE $3 AND LOWER(u.last_name) = $2)
+            )
+            AND u.status = 'active'
+            ORDER BY CASE WHEN u.role = 'advisor' THEN 0 ELSE 1 END, u.id
+            LIMIT 1
+          `;
+          
+          // Create fuzzy patterns for common misspellings
+          // Handle common patterns: akeem -> akeen, etc.
+          const fuzzyFirst = parts[0].substring(0, 3) + '%'; // First 3 chars + wildcard (ake%)
+          result = await poolConnection.query(query, [parts[0] + '%', parts[1], fuzzyFirst]);
+        }
         
         if (result.rows.length > 0) {
           const user = result.rows[0];
@@ -172,9 +213,14 @@ async function identifyUserFromQuery(poolConnection, query, currentUser) {
   console.log('🤖 AI User Identification V2:', { query });
   
   // Check for "my" or "me" keywords first - use current user
+  // But be careful not to match "provide me with [name]" patterns
   const queryLower = query.toLowerCase();
-  if (queryLower.includes(' my ') || queryLower.includes(' me ') || queryLower.startsWith('my ') || 
-      queryLower === 'my scorecard' || queryLower === 'show my scorecard') {
+  const hasMyKeywords = queryLower.includes(' my ') || queryLower.startsWith('my ') || 
+                       queryLower === 'my scorecard' || queryLower === 'show my scorecard';
+  const hasMeKeywords = queryLower.includes(' me ') && !queryLower.includes('provide me with') && 
+                       !queryLower.includes('show me') && !queryLower.includes('get me');
+  
+  if (hasMyKeywords || hasMeKeywords) {
     console.log('🎯 Query contains "my/me" - using current user');
     return currentUser;
   }
