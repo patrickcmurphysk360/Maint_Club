@@ -45,11 +45,14 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
 
   // Parse filename to extract metadata
   const parseFilename = (filename: string): FileInfo => {
+    console.log('🔍 Parsing filename:', filename);
     // New format: "market_id-YYYY-MM-DD-time-Services-hash.xlsx"
     // End-of-month format: "market_id-MonthName-YYYY-Services-hash.xlsx"
     // More flexible parsing to match backend
     const base = filename.replace(/\.xlsx?$/i, '');
     const tokens = base.split('-');
+    console.log('📋 Base filename:', base);
+    console.log('🔢 Tokens:', tokens);
     
     // Month names mapping
     const monthNames: { [key: string]: number } = {
@@ -144,6 +147,15 @@ const UnifiedUploader: React.FC<UnifiedUploaderProps> = ({ onUploadComplete }) =
       };
     }
 
+    console.log('❌ Failed to parse filename. Debug info:', {
+      filename,
+      base,
+      tokens,
+      firstToken: tokens[0],
+      startsWithNumeric: /^\d+-.+/.test(base),
+      tokenCount: tokens.length
+    });
+    
     return {
       marketId: '',
       market: '',

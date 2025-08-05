@@ -552,7 +552,7 @@ class ExcelParser {
     // Also support legacy format for backward compatibility
     // Legacy: "Market Name - System - Type - YYYY-MM-DD.xlsx"
     
-    const base = filename.replace('.xlsx', '');
+    const base = filename.replace(/\.xlsx?$/i, '');
     
     // Month names mapping
     const monthNames = {
