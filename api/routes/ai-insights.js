@@ -237,14 +237,55 @@ router.post('/chat', async (req, res) => {
           const validatedData = aiDataService.validateScorecardResponse(jsonResponse.response, scorecardData);
           
           // Format the validated data into a human-readable response
-          const formattedResponse = `**Scorecard for ${validatedData.advisor} in ${validatedData.period}**
+          let formattedResponse = `**Scorecard for ${validatedData.advisor} in ${validatedData.period}**
 
+**Key Metrics:**
 * **Sales:** $${validatedData.sales.toLocaleString()}
 * **GP Sales:** $${validatedData.gpSales.toLocaleString()}
 * **GP Percent:** ${validatedData.gpPercent}%
 * **Invoices:** ${validatedData.invoices}
+
+**Tire Sales:**
 * **Retail Tires:** ${validatedData.retailTires}
 * **All Tires:** ${validatedData.allTires}`;
+
+          // Add all services from the scorecard data
+          if (scorecardData.services) {
+            formattedResponse += '\n\n**Services Performed:**';
+            const serviceCategories = {
+              'Core Services': ['Oil Change', 'Alignments', 'Brake Service', 'Tire Rotation', 'Tire Balance'],
+              'Fluid Services': ['Brake Flush', 'Coolant Flush', 'Transmission Fluid Service', 'Power Steering Flush', 'Differential Service'],
+              'Filters & Maintenance': ['Engine Air Filter', 'Cabin Air Filter', 'Wiper Blades', 'Battery', 'Battery Service'],
+              'Specialty Services': ['BG Advanced Formula MOA®', 'BG EPR® Engine Performance Restoration®', 'Fuel System Service', 'AC Service'],
+              'Additional Services': ['Shocks & Struts', 'Spark Plug Replacement', 'Belts Replacement', 'Timing Belt', 'TPMS']
+            };
+
+            for (const [category, services] of Object.entries(serviceCategories)) {
+              const categoryServices = services.filter(service => 
+                scorecardData.services[service] !== undefined && scorecardData.services[service] > 0
+              );
+              
+              if (categoryServices.length > 0) {
+                formattedResponse += `\n\n${category}:`;
+                categoryServices.forEach(service => {
+                  const value = scorecardData.services[service];
+                  formattedResponse += `\n* ${service}: ${value}`;
+                });
+              }
+            }
+
+            // Add protection percentages if available
+            if (scorecardData.services['Tire Protection %']) {
+              formattedResponse += '\n\n**Performance Metrics:**';
+              formattedResponse += `\n* Tire Protection Rate: ${scorecardData.services['Tire Protection %']}%`;
+              if (scorecardData.services['Potential Alignments %']) {
+                formattedResponse += `\n* Alignment Capture Rate: ${scorecardData.services['Potential Alignments %']}%`;
+              }
+              if (scorecardData.services['Brake Flush to Service %']) {
+                formattedResponse += `\n* Brake Flush Attachment: ${scorecardData.services['Brake Flush to Service %']}%`;
+              }
+            }
+          }
           
           aiResponse = {
             success: true,
