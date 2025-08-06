@@ -535,7 +535,10 @@ router.post('/scorecard', async (req, res) => {
       { expiresIn: '5m' }
     );
     
-    const baseURL = process.env.NODE_ENV === 'production' ? 'http://api:5000' : 'http://localhost:5000';
+    // When running in Docker, use internal container communication
+    // When running locally (npm run dev), use localhost
+    const isDocker = process.env.POSTGRES_HOST === 'host.docker.internal';
+    const baseURL = isDocker ? 'http://host.docker.internal:5002' : 'http://localhost:5000';
     
     const scorecardResponse = await axios.get(`${baseURL}/api/scorecard/advisor/${advisorId}`, {
       params: period ? { period } : {},

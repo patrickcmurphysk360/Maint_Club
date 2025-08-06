@@ -85,7 +85,10 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
   }
 
   // Build endpoint URL - single source of truth
-  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5000';
+  // Use port 5002 for Docker, 5000 for local development
+  const isDocker = process.env.POSTGRES_HOST === 'host.docker.internal';
+  const defaultPort = isDocker ? '5002' : '5000';
+  const defaultBaseURL = process.env.API_BASE_URL || `http://localhost:${defaultPort}`;
   const apiBaseURL = baseURL || defaultBaseURL;
   let endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
   
@@ -354,7 +357,10 @@ function validateDataSource(data) {
  */
 async function checkScorecardAPIHealth(baseURL = null) {
   // Single source of truth
-  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5000';
+  // Use port 5002 for Docker, 5000 for local development
+  const isDocker = process.env.POSTGRES_HOST === 'host.docker.internal';
+  const defaultPort = isDocker ? '5002' : '5000';
+  const defaultBaseURL = process.env.API_BASE_URL || `http://localhost:${defaultPort}`;
   const apiBaseURL = baseURL || defaultBaseURL;
   
   console.log('🏥 Checking scorecard API health...');
