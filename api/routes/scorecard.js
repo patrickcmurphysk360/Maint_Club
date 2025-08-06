@@ -6,7 +6,24 @@ router.get('/advisor/:userId', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { userId } = req.params;
-    const { startDate, endDate, mtdMonth, mtdYear } = req.query;
+    const { startDate, endDate, mtdMonth, mtdYear, period } = req.query;
+    
+    console.log(`[DEBUG aggregator] Query params:`, { startDate, endDate, mtdMonth, mtdYear, period });
+    
+    // Parse period parameter (YYYY-MM format) into mtdMonth/mtdYear
+    let finalMtdMonth = mtdMonth;
+    let finalMtdYear = mtdYear;
+    
+    if (period && !mtdMonth && !mtdYear) {
+      const periodMatch = period.match(/^(\d{4})-(\d{2})$/);
+      if (periodMatch) {
+        finalMtdYear = parseInt(periodMatch[1]);
+        finalMtdMonth = parseInt(periodMatch[2]);
+        console.log(`[DEBUG aggregator] Parsed period ${period} to MTD: ${finalMtdMonth}/${finalMtdYear}`);
+      } else {
+        console.log(`[DEBUG aggregator] Invalid period format: ${period}`);
+      }
+    }
     
     // Debug logging temporarily disabled
     // console.log('🔍 SCORECARD DEBUG: Getting scorecard for user', userId, 'from', startDate, 'to', endDate);
@@ -19,9 +36,9 @@ router.get('/advisor/:userId', async (req, res) => {
     // Get the LATEST performance data for specific MTD month or date range
     let performanceResult;
     
-    if (mtdMonth && mtdYear) {
+    if (finalMtdMonth && finalMtdYear) {
       // MTD-specific query: get LATEST record per store for the specified month
-      console.log(`📊 Getting MTD data for ${mtdYear}-${mtdMonth.padStart(2, '0')} for user ${userId} (latest per store only)`);
+      console.log(`📊 Getting MTD data for ${finalMtdYear}-${String(finalMtdMonth).padStart(2, '0')} for user ${userId} (latest per store only)`);
       
       performanceResult = await pool.query(`
         WITH latest_per_store AS (
@@ -49,7 +66,7 @@ router.get('/advisor/:userId', async (req, res) => {
         FROM latest_per_store 
         WHERE rn = 1
         ORDER BY store_name
-      `, [userId, parseInt(mtdYear), parseInt(mtdMonth)]);
+      `, [userId, parseInt(finalMtdYear), parseInt(finalMtdMonth)]);
     } else {
       // Date range query (backward compatibility)
       performanceResult = await pool.query(`
