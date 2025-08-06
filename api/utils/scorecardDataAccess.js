@@ -85,7 +85,7 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
   }
 
   // Build endpoint URL - single source of truth
-  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5002';
+  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5000';
   const apiBaseURL = baseURL || defaultBaseURL;
   let endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
   
@@ -354,7 +354,7 @@ function validateDataSource(data) {
  */
 async function checkScorecardAPIHealth(baseURL = null) {
   // Single source of truth
-  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5002';
+  const defaultBaseURL = process.env.API_BASE_URL || 'http://localhost:5000';
   const apiBaseURL = baseURL || defaultBaseURL;
   
   console.log('🏥 Checking scorecard API health...');

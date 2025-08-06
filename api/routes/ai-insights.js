@@ -535,7 +535,7 @@ router.post('/scorecard', async (req, res) => {
       { expiresIn: '5m' }
     );
     
-    const baseURL = process.env.NODE_ENV === 'production' ? 'http://api:5000' : 'http://localhost:5002';
+    const baseURL = process.env.NODE_ENV === 'production' ? 'http://api:5000' : 'http://localhost:5000';
     
     const scorecardResponse = await axios.get(`${baseURL}/api/scorecard/advisor/${advisorId}`, {
       params: period ? { period } : {},
