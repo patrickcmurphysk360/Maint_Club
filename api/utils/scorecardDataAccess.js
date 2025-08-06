@@ -169,9 +169,38 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
 
     // Validate required fields are present
     const requiredFields = REQUIRED_SCORECARD_FIELDS[normalizedLevel];
-    const missingFields = requiredFields.filter(field => 
-      scorecardData[field] === undefined || scorecardData[field] === null
-    );
+    const missingFields = requiredFields.filter(field => {
+      // Check root level first
+      if (scorecardData[field] !== undefined && scorecardData[field] !== null) {
+        return false;
+      }
+      
+      // For advisor level, check metrics object and services object
+      if (normalizedLevel === 'advisor') {
+        // Check metrics object for basic fields
+        if (scorecardData.metrics && (scorecardData.metrics[field] !== undefined && scorecardData.metrics[field] !== null)) {
+          return false;
+        }
+        
+        // Check services object for service fields (with proper mapping)
+        if (scorecardData.services) {
+          // Map field names to service names
+          const serviceFieldMap = {
+            'retailTires': 'Retail Tires',
+            'alignments': 'Alignments',
+            'oilChange': 'Oil Change',
+            'brakeService': 'Brake Service'
+          };
+          
+          const serviceName = serviceFieldMap[field] || field;
+          if (scorecardData.services[serviceName] !== undefined && scorecardData.services[serviceName] !== null) {
+            return false;
+          }
+        }
+      }
+      
+      return true; // Field is missing
+    });
 
     if (missingFields.length > 0) {
       console.warn(`⚠️ Missing required fields in ${normalizedLevel} scorecard: ${missingFields.join(', ')}`);

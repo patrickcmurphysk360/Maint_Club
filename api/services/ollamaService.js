@@ -98,7 +98,7 @@ class OllamaService {
     }
   }
 
-  async generateResponse(prompt, model = null, context = null, userId = null, query = null, contextData = null) {
+  async generateResponse(prompt, model = null, context = null, userId = null, query = null, contextData = null, options = {}) {
     try {
       const requestModel = model || this.defaultModel;
       
@@ -109,7 +109,7 @@ class OllamaService {
         prompt: prompt,
         stream: false,
         options: {
-          temperature: AI_AGENT_CONFIG.generation.temperature,
+          temperature: options.temperature !== undefined ? options.temperature : AI_AGENT_CONFIG.generation.temperature,
           top_k: AI_AGENT_CONFIG.generation.top_k,
           top_p: AI_AGENT_CONFIG.generation.top_p,
           num_predict: AI_AGENT_CONFIG.generation.num_predict,

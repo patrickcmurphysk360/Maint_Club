@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const buildScorecardPrompt = require('./promptBuilders/scorecardPrompt').build;
 
 /**
  * AI Data Service - Centralized data access for AI insights
@@ -1302,8 +1303,11 @@ class AIDataService {
           let personPerfMatch = lowerQuery.match(/(?:what\s+(?:is|does|are)|how\s+(?:is|does|are))\s+([a-zA-Z\s]+?)(?:'s|\s+)(?:performance|doing|sales|numbers)/i);
           
           if (!personPerfMatch) {
-            // Pattern: "Show me [Name] scorecard" 
-            personPerfMatch = lowerQuery.match(/show\s+me\s+([a-zA-Z\s]+?)\s+scorecard/i);
+            // Pattern: "Show me [Name] scorecard" or "Show me the scorecard for [Name]"
+            personPerfMatch = lowerQuery.match(/show\s+me\s+(?:the\s+)?scorecard\s+for\s+([a-zA-Z\s]+?)(?:\s+for|\s+in|\s*$)/i);
+            if (!personPerfMatch) {
+              personPerfMatch = lowerQuery.match(/show\s+me\s+([a-zA-Z\s]+?)(?:'s)?\s+scorecard/i);
+            }
           }
           
           if (!personPerfMatch) {
@@ -1697,6 +1701,78 @@ class AIDataService {
     ];
     
     return rankingIndicators.some(indicator => lowerQuery.includes(indicator));
+  }
+
+  /**
+   * Build JSON-only prompt for scorecard queries
+   * Ensures AI only echoes exact values without hallucination
+   */
+  buildScorecardJsonPrompt(personName, period, scorecardData) {
+    // Extract key metrics from scorecard data - check both root level and nested locations
+    const metrics = {
+      invoices: scorecardData.invoices || scorecardData.metrics?.invoices || 0,
+      sales: scorecardData.sales || scorecardData.metrics?.sales || 0,
+      gpSales: scorecardData.gpSales || scorecardData.metrics?.gpSales || 0,
+      gpPercent: Math.ceil(scorecardData.gpPercent || scorecardData.metrics?.gpPercent || 0), // Match scorecard rounding
+      retailTires: scorecardData.retailTires || scorecardData.services?.['Retail Tires'] || 0,
+      allTires: scorecardData.allTires || scorecardData.services?.['All Tires'] || 0
+    };
+    
+    return buildScorecardPrompt({
+      advisor: personName,
+      period: period,
+      metrics: metrics
+    });
+  }
+
+  /**
+   * Validate AI response matches source data exactly
+   * Throws error if any numeric mismatch detected
+   */
+  validateScorecardResponse(aiResponse, sourceData) {
+    let echo;
+    try {
+      echo = typeof aiResponse === 'string' ? JSON.parse(aiResponse) : aiResponse;
+    } catch (error) {
+      throw new Error('AI did not return valid JSON');
+    }
+    
+    const fieldsToValidate = ['sales', 'invoices', 'retailTires', 'allTires', 'gpSales', 'gpPercent'];
+    
+    fieldsToValidate.forEach(field => {
+      const aiValue = Number(echo[field] || 0);
+      
+      // Get source value from correct location
+      let srcValue;
+      if (['sales', 'invoices', 'gpSales', 'gpPercent'].includes(field)) {
+        srcValue = Number(sourceData[field] || sourceData.metrics?.[field] || 0);
+        
+        // Handle rounding for percentage fields
+        if (field === 'gpPercent') {
+          srcValue = Math.ceil(srcValue); // Match scorecard rounding
+        }
+      } else if (['retailTires', 'allTires'].includes(field)) {
+        const serviceMap = { retailTires: 'Retail Tires', allTires: 'All Tires' };
+        const serviceName = serviceMap[field] || field;
+        srcValue = Number(sourceData[field] || sourceData.services?.[serviceName] || 0);
+      } else {
+        srcValue = Number(sourceData[field] || 0);
+      }
+      
+      // Allow small rounding differences for percentage fields
+      if (field === 'gpPercent') {
+        const diff = Math.abs(aiValue - srcValue);
+        if (diff > 0.5) { // Allow up to 0.5% difference for rounding
+          throw new Error(`Fabrication in field "${field}" – AI:${aiValue} vs API:${srcValue} (diff: ${diff.toFixed(2)})`);
+        }
+      } else {
+        if (aiValue !== srcValue) {
+          throw new Error(`Fabrication in field "${field}" – AI:${aiValue} vs API:${srcValue}`);
+        }
+      }
+    });
+    
+    return echo;
   }
 }
 

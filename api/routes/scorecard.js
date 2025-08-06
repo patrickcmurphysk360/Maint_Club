@@ -125,6 +125,11 @@ router.get('/advisor/:userId', async (req, res) => {
     });
     
     // Aggregate data from latest performance record per store (MTD snapshots)
+    console.log(`[DEBUG] performanceResult.rows.length: ${performanceResult.rows.length}`);
+    if (performanceResult.rows.length > 0) {
+      console.log(`[DEBUG] First row:`, JSON.stringify(performanceResult.rows[0], null, 2));
+    }
+    
     performanceResult.rows.forEach((row, index) => {
       const data = row.data;
       

@@ -201,20 +201,83 @@ router.post('/chat', async (req, res) => {
       role: req.user.role === 'admin' || req.user.role === 'administrator' ? req.user.role : context.user.role
     };
 
-    // Generate enhanced AI prompt
-    const prompt = context.business_intelligence 
-      ? ollama.generateEnhancedPrompt(query, context)
-      : ollama.generatePerformancePrompt(query, context);
+    // Check if this is a scorecard query that needs JSON format
+    const isSpecificScorecardQuery = context.performance?.is_specific_person_query && 
+                                    context.performance?.validated_data?.success &&
+                                    context.performance?.validated_data?.data;
+    
+    let prompt;
+    let aiResponse;
+    
+    if (isSpecificScorecardQuery) {
+      // Use JSON-only prompt for scorecard queries
+      console.log('📊 Using JSON-only prompt for scorecard query');
+      const scorecardData = context.performance.validated_data.data;
+      const personName = context.performance.specific_person_name || context.user.name;
+      const period = `${mtdYear || new Date().getFullYear()}-${String(mtdMonth || new Date().getMonth() + 1).padStart(2, '0')}`;
+      
+      // Build JSON prompt using AIDataService
+      const aiDataService = ollama.aiDataService;
+      prompt = aiDataService.buildScorecardJsonPrompt(personName, period, scorecardData);
+      
+      // Get AI response with temperature 0 for deterministic output
+      const jsonResponse = await ollama.generateResponse(
+        prompt, 
+        model, 
+        null, // context param
+        targetUserId, // userId for validation
+        query, // original query for validation
+        context, // context data for validation
+        { temperature: 0 } // Override temperature for JSON responses
+      );
+      
+      if (jsonResponse.success) {
+        try {
+          // Validate the response matches source data
+          const validatedData = aiDataService.validateScorecardResponse(jsonResponse.response, scorecardData);
+          
+          // Format the validated data into a human-readable response
+          const formattedResponse = `**Scorecard for ${validatedData.advisor} in ${validatedData.period}**
 
-    // Get AI response WITH VALIDATION
-    const aiResponse = await ollama.generateResponse(
-      prompt, 
-      model, 
-      null, // context param
-      targetUserId, // userId for validation
-      query, // original query for validation
-      context // context data for validation
-    );
+* **Sales:** $${validatedData.sales.toLocaleString()}
+* **GP Sales:** $${validatedData.gpSales.toLocaleString()}
+* **GP Percent:** ${validatedData.gpPercent}%
+* **Invoices:** ${validatedData.invoices}
+* **Retail Tires:** ${validatedData.retailTires}
+* **All Tires:** ${validatedData.allTires}`;
+          
+          aiResponse = {
+            success: true,
+            response: formattedResponse,
+            model: jsonResponse.model,
+            validation: { isValid: true, violationCount: 0 }
+          };
+        } catch (validationError) {
+          console.error('❌ Scorecard validation failed:', validationError.message);
+          aiResponse = {
+            success: false,
+            error: `Data validation failed: ${validationError.message}`
+          };
+        }
+      } else {
+        aiResponse = jsonResponse;
+      }
+    } else {
+      // Use standard prompts for non-scorecard queries
+      prompt = context.business_intelligence 
+        ? ollama.generateEnhancedPrompt(query, context)
+        : ollama.generatePerformancePrompt(query, context);
+
+      // Get AI response WITH VALIDATION
+      aiResponse = await ollama.generateResponse(
+        prompt, 
+        model, 
+        null, // context param
+        targetUserId, // userId for validation
+        query, // original query for validation
+        context // context data for validation
+      );
+    }
 
     if (!aiResponse.success) {
       return res.status(500).json({
