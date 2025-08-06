@@ -480,6 +480,129 @@ router.get('/models', async (req, res) => {
   }
 });
 
+// Dedicated scorecard endpoint for AI agent
+router.post('/scorecard', async (req, res) => {
+  console.log('[AI-INSIGHTS] Scorecard request body:', req.body);
+  
+  res.on('finish', () => {
+    console.log('[AI-INSIGHTS] Scorecard response completed for period:', req.body.period, 'status:', res.statusCode);
+  });
+  
+  try {
+    const pool = req.app.locals.pool;
+    const { advisorId, period } = req.body;
+    
+    console.log('[AI-INSIGHTS] Processing scorecard request:', { advisorId, period });
+    
+    if (!advisorId) {
+      return res.status(400).json({ message: 'advisorId is required' });
+    }
+
+    // Permission check - advisors can only query their own data, admins can query anyone
+    if (req.user.role === 'advisor' && parseInt(advisorId) !== req.user.id) {
+      return res.status(403).json({ message: 'Permission denied' });
+    }
+    
+    // Log admin access to other users' data
+    if ((req.user.role === 'admin' || req.user.role === 'administrator') && parseInt(advisorId) !== req.user.id) {
+      console.log(`🔑 Admin ${req.user.email} accessing scorecard data for advisor ${advisorId}`);
+    }
+
+    // Get user info for display name
+    const userResult = await pool.query(`
+      SELECT id, first_name, last_name, email, role, status
+      FROM users
+      WHERE id = $1
+    `, [advisorId]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Advisor not found' });
+    }
+
+    const userData = userResult.rows[0];
+    const advisorName = `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || 'Unknown Advisor';
+
+    // Use scorecard API directly with period parameter
+    console.log('[AI-INSIGHTS] Calling scorecard API with period:', period);
+    
+    const axios = require('axios');
+    const jwt = require('jsonwebtoken');
+    
+    // Create service token for internal API calls
+    const serviceToken = jwt.sign(
+      { id: req.user.id, role: req.user.role, service: 'ai-insights' },
+      process.env.JWT_SECRET || 'maintenance_club_jwt_secret_change_in_production',
+      { expiresIn: '5m' }
+    );
+    
+    const baseURL = process.env.NODE_ENV === 'production' ? 'http://api:5000' : 'http://localhost:5002';
+    
+    const scorecardResponse = await axios.get(`${baseURL}/api/scorecard/advisor/${advisorId}`, {
+      params: period ? { period } : {},
+      headers: { 'Authorization': `Bearer ${serviceToken}` }
+    });
+    
+    const scorecardData = scorecardResponse.data;
+    console.log('[AI-INSIGHTS] Scorecard API returned:', {
+      hasMetrics: !!scorecardData.metrics,
+      hasServices: !!scorecardData.services,
+      sales: scorecardData.metrics?.sales,
+      invoices: scorecardData.metrics?.invoices
+    });
+
+    // Initialize AI service
+    const ollama = new OllamaService(pool);
+    const aiDataService = ollama.aiDataService;
+
+    // Build JSON-only prompt
+    const prompt = aiDataService.buildScorecardJsonPrompt(advisorName, period || 'current', scorecardData);
+    
+    console.log('[AI-INSIGHTS] Generated prompt for period:', period);
+    console.dir({ periodInPrompt: period }, { depth: null });
+
+    // Get AI response with temperature 0 for deterministic output
+    const jsonResponse = await ollama.generateResponse(
+      prompt, 
+      null, // model (use default)
+      null, // context param
+      parseInt(advisorId), // userId for validation
+      `scorecard for ${advisorName} ${period ? `for ${period}` : ''}`, // original query for validation
+      { performance: { validated_data: { data: scorecardData } } }, // context data for validation
+      { temperature: 0 } // Override temperature for JSON responses
+    );
+    
+    if (jsonResponse.success) {
+      try {
+        // Validate the response matches source data
+        const validatedData = aiDataService.validateScorecardResponse(jsonResponse.response, scorecardData);
+        
+        // Return the validated JSON data directly
+        res.json(validatedData);
+        
+      } catch (validationError) {
+        console.error('❌ Scorecard validation failed:', validationError.message);
+        res.status(500).json({
+          message: 'Data validation failed',
+          error: validationError.message
+        });
+      }
+    } else {
+      console.error('❌ AI response failed:', jsonResponse.error);
+      res.status(500).json({
+        message: 'AI service error',
+        error: jsonResponse.error
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ AI Scorecard Error:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Store-level insights (for managers)
 router.get('/insights/store/:storeId', async (req, res) => {
   try {

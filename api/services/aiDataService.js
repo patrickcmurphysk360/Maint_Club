@@ -1718,6 +1718,9 @@ class AIDataService {
       allTires: scorecardData.allTires || scorecardData.services?.['All Tires'] || 0
     };
     
+    console.log('[AI-DATA-SERVICE] Building scorecard prompt with period:', period);
+    console.dir({ periodInPrompt: period }, { depth: null });
+    
     return buildScorecardPrompt({
       advisor: personName,
       period: period,
