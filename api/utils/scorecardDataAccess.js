@@ -88,7 +88,8 @@ async function getValidatedScorecardData({ level, id, baseURL = null, timeout = 
   // Use port 5002 for Docker, 5000 for local development
   const isDocker = process.env.POSTGRES_HOST === 'host.docker.internal';
   const defaultPort = isDocker ? '5002' : '5000';
-  const defaultBaseURL = process.env.API_BASE_URL || `http://localhost:${defaultPort}`;
+  // Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+  const defaultBaseURL = process.env.API_BASE_URL || `http://127.0.0.1:${defaultPort}`;
   const apiBaseURL = baseURL || defaultBaseURL;
   let endpoint = `${apiBaseURL}/api/scorecard/${normalizedLevel}/${id}`;
   
@@ -360,7 +361,8 @@ async function checkScorecardAPIHealth(baseURL = null) {
   // Use port 5002 for Docker, 5000 for local development
   const isDocker = process.env.POSTGRES_HOST === 'host.docker.internal';
   const defaultPort = isDocker ? '5002' : '5000';
-  const defaultBaseURL = process.env.API_BASE_URL || `http://localhost:${defaultPort}`;
+  // Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+  const defaultBaseURL = process.env.API_BASE_URL || `http://127.0.0.1:${defaultPort}`;
   const apiBaseURL = baseURL || defaultBaseURL;
   
   console.log('🏥 Checking scorecard API health...');

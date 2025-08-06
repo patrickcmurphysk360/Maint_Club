@@ -402,6 +402,38 @@ class AIDataService {
   /**
    * Detect if a query is asking for performance-related information
    */
+  /**
+   * Extract month and year from a natural language query
+   */
+  extractDateFromQuery(query) {
+    if (!query) return { mtdMonth: null, mtdYear: null };
+    
+    const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+    const queryLower = query.toLowerCase();
+    
+    let mtdMonth = null;
+    let mtdYear = null;
+    
+    // Look for month name and year
+    monthNames.forEach((month, index) => {
+      if (queryLower.includes(month)) {
+        mtdMonth = index + 1;
+        // Look for year after month
+        const yearMatch = queryLower.match(new RegExp(month + '\\s+(\\d{4})'));
+        if (yearMatch) {
+          mtdYear = parseInt(yearMatch[1]);
+        }
+      }
+    });
+    
+    // If no year found, use current year
+    if (mtdMonth && !mtdYear) {
+      mtdYear = new Date().getFullYear();
+    }
+    
+    return { mtdMonth, mtdYear };
+  }
+
   detectPerformanceIntent(query) {
     if (!query) return false;
     
@@ -1413,11 +1445,24 @@ class AIDataService {
           console.log(`📊 POLICY ENFORCEMENT: Getting advisor scorecard for requesting user (ID: ${userId})`);
           
           try {
-            const scorecardResult = await getValidatedScorecardData({ 
+            // Include date parameters if this is a performance query with dates
+            const scorecardParams = { 
               level: 'advisor', 
               id: userId
               // Let utility determine correct baseURL (Docker internal vs external)
-            });
+            };
+            
+            // Add date parameters if available from query parsing
+            if (isPerformanceQuery && query) {
+              const { mtdMonth, mtdYear } = this.extractDateFromQuery(query);
+              if (mtdMonth && mtdYear) {
+                scorecardParams.mtdMonth = mtdMonth;
+                scorecardParams.mtdYear = mtdYear;
+                console.log(`📅 Including date parameters for user scorecard: ${mtdMonth}/${mtdYear}`);
+              }
+            }
+            
+            const scorecardResult = await getValidatedScorecardData(scorecardParams);
             
             performanceData = {
               success: scorecardResult.success,

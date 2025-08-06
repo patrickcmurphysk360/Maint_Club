@@ -46,6 +46,17 @@ function extractPotentialNames(query) {
     });
   }
   
+  // Pattern 2.5: "get me [name]'s scorecard" pattern (high confidence)
+  // Match both proper case and lowercase names
+  const getMeScorecardMatch = cleanQuery.match(/get\s+me\s+(\w+\s+\w+)(?:'s)?\s+(?:august\s+\d+\s+)?scorecard/);
+  if (getMeScorecardMatch) {
+    patterns.push({
+      name: getMeScorecardMatch[1],
+      confidence: 'high',
+      pattern: 'get_me_scorecard'
+    });
+  }
+  
   // Pattern 3: "has [Name] sold" pattern (high confidence)
   const hasSoldMatch = originalQuery.match(/has\s+([A-Z][a-z]+\s+[A-Z][a-z]+)\s+sold/);
   if (hasSoldMatch && hasSoldMatch[1]) {
